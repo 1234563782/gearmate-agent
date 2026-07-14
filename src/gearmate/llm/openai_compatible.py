@@ -1,16 +1,17 @@
+import json
 from dataclasses import dataclass
+from typing import cast
 
+import httpx
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 from pydantic import SecretStr
 
 from gearmate.config import Settings
-from gearmate.llm.types import ModelRequest, ModelResponse
+from gearmate.llm.types import ModelRequest, ModelResponse, ModelToolCall, ModelUsage
 
 
 class ModelConfigurationError(ValueError):
-    pass
-
-
-class ModelInvocationDisabledError(RuntimeError):
     pass
 
 
@@ -46,13 +47,96 @@ class OpenAICompatibleConfig:
 class OpenAICompatibleChatModel:
     def __init__(self, config: OpenAICompatibleConfig) -> None:
         self._config = config
+        timeout = httpx.Timeout(
+            timeout=config.request_timeout_seconds,
+            connect=config.connect_timeout_seconds,
+        )
+        self._client = AsyncOpenAI(
+            base_url=config.base_url,
+            api_key=config.api_key.get_secret_value(),
+            timeout=timeout,
+        )
 
     @property
     def config(self) -> OpenAICompatibleConfig:
         return self._config
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        del request
-        raise ModelInvocationDisabledError(
-            "Model invocation is disabled until the model ADR and graph workflow are approved"
+        messages: list[ChatCompletionMessageParam] = []
+        for message in request.messages:
+            item: dict[str, object] = {"role": message.role, "content": message.content}
+            if message.name is not None:
+                item["name"] = message.name
+            if message.tool_call_id is not None:
+                item["tool_call_id"] = message.tool_call_id
+            if message.tool_calls:
+                item["tool_calls"] = [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for call in message.tool_calls
+                ]
+            messages.append(cast(ChatCompletionMessageParam, item))
+
+        tools = [
+            cast(
+                ChatCompletionToolParam,
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                },
+            )
+            for tool in request.tools
+        ]
+        if tools:
+            response = await self._client.chat.completions.create(
+                model=self._config.model_id,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=request.max_output_tokens,
+                temperature=request.temperature,
+            )
+        else:
+            response = await self._client.chat.completions.create(
+                model=self._config.model_id,
+                messages=messages,
+                max_tokens=request.max_output_tokens,
+                temperature=request.temperature,
+            )
+        choice = response.choices[0]
+        tool_calls: list[ModelToolCall] = []
+        for call in choice.message.tool_calls or []:
+            try:
+                arguments = json.loads(call.function.arguments)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    f"Model returned invalid tool arguments for {call.function.name}"
+                ) from error
+            if not isinstance(arguments, dict):
+                raise ValueError(f"Tool arguments for {call.function.name} must be an object")
+            tool_calls.append(
+                ModelToolCall(id=call.id, name=call.function.name, arguments=arguments)
+            )
+        usage = response.usage
+        return ModelResponse(
+            text=choice.message.content or "",
+            finish_reason=choice.finish_reason or "unknown",
+            usage=ModelUsage(
+                input_tokens=usage.prompt_tokens if usage is not None else 0,
+                output_tokens=usage.completion_tokens if usage is not None else 0,
+            ),
+            tool_calls=tuple(tool_calls),
         )
+
+    async def close(self) -> None:
+        await self._client.close()

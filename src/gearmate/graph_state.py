@@ -1,6 +1,6 @@
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
-from gearmate.llm.types import ModelMessage
+from gearmate.llm.types import ModelMessage, ModelToolCall
 
 RunStatus = Literal[
     "RUNNING",
@@ -14,11 +14,18 @@ RunStatus = Literal[
 
 
 class GearMateGraphState(TypedDict):
-    conversation_id: str
-    run_id: str
-    user_id: str
-    timezone: str
-    status: RunStatus
+    conversation_id: NotRequired[str]
+    run_id: NotRequired[str]
+    user_id: NotRequired[str]
+    timezone: NotRequired[str]
+    status: NotRequired[RunStatus]
     messages: list[ModelMessage]
-    selected_tool: str | None
+    selected_tool: NotRequired[str | None]
     error_code: str | None
+    stop_reason: str | None
+    model_rounds: int
+    tool_call_count: int
+    pending_tool_calls: list[ModelToolCall]
+    final_text: str | None
+    input_tokens: int
+    output_tokens: int

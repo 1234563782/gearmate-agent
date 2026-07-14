@@ -1,8 +1,16 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 ModelRole = Literal["system", "user", "assistant", "tool"]
+
+
+class ModelToolCall(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
 
 
 class ModelMessage(BaseModel):
@@ -12,6 +20,15 @@ class ModelMessage(BaseModel):
     content: str
     name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: tuple[ModelToolCall, ...] = ()
+
+
+class ModelToolDefinition(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
 
 
 class ModelRequest(BaseModel):
@@ -20,6 +37,7 @@ class ModelRequest(BaseModel):
     messages: tuple[ModelMessage, ...]
     max_output_tokens: int = Field(ge=1)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    tools: tuple[ModelToolDefinition, ...] = ()
 
 
 class ModelUsage(BaseModel):
@@ -35,3 +53,4 @@ class ModelResponse(BaseModel):
     text: str
     finish_reason: str
     usage: ModelUsage = Field(default_factory=ModelUsage)
+    tool_calls: tuple[ModelToolCall, ...] = ()

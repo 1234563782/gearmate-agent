@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings>=2.7,<3",
     "pyjwt[crypto]>=2.10,<3",
     "sqlalchemy[asyncio]>=2.0,<3",
+    "tzdata>=2025.1",
     "uvicorn[standard]>=0.34,<1",
 ]
 
@@ -35,6 +36,9 @@ gearmate = "gearmate.main:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gearmate"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/gearmate/prompts" = "gearmate/prompts"
 
 [tool.pytest.ini_options]
 addopts = "-q"

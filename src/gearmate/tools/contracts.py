@@ -3,10 +3,19 @@ from datetime import datetime
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.alias_generators import to_camel
 
 
-class RentalPeriodInput(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ToolModel(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+
+class RentalPeriodInput(ToolModel):
 
     start_at: datetime
     end_at: datetime
@@ -20,8 +29,7 @@ class RentalPeriodInput(BaseModel):
         return self
 
 
-class ProductSearchInput(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ProductSearchInput(ToolModel):
 
     keyword: str | None = Field(default=None, max_length=128)
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
@@ -30,8 +38,7 @@ class ProductSearchInput(BaseModel):
     size: int = Field(default=20, ge=1, le=100)
 
 
-class ProductSummary(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ProductSummary(ToolModel):
 
     product_id: str
     category_id: str
@@ -43,8 +50,7 @@ class ProductSummary(BaseModel):
     available_count: int | None = Field(default=None, ge=0)
 
 
-class ProductSearchResult(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class ProductSearchResult(ToolModel):
 
     items: tuple[ProductSummary, ...]
     page: int = Field(ge=0)
@@ -57,8 +63,7 @@ class AvailabilityInput(RentalPeriodInput):
     product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 
-class AvailabilityResult(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class AvailabilityResult(ToolModel):
 
     product_id: str
     start_at: datetime
@@ -72,8 +77,7 @@ class QuoteInput(RentalPeriodInput):
     product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 
-class PriceSnapshot(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class PriceSnapshot(ToolModel):
 
     currency: str
     pricing_version: int = Field(ge=1)
@@ -86,8 +90,7 @@ class PriceSnapshot(BaseModel):
     rounding_mode: str
 
 
-class QuoteResult(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class QuoteResult(ToolModel):
 
     quote_id: str
     product_id: str

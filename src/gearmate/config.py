@@ -19,6 +19,9 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://gearmate:replace-with-local-password@localhost:5432/gearmate"
     )
     rentflow_base_url: str = "http://localhost:8080"
+    rentflow_connect_timeout_seconds: float = 5.0
+    rentflow_read_timeout_seconds: float = 20.0
+    tool_timeout_seconds: float = 30.0
     jwt_public_key_path: Path | None = None
     jwt_issuer: str = "rentflow-server"
     jwt_audience: str = "rentflow-platform"
@@ -33,6 +36,12 @@ class Settings(BaseSettings):
     model_request_timeout_seconds: float = 120.0
     model_max_output_tokens: int = 4096
     run_timeout_seconds: float = 180.0
+    max_model_rounds: int = 6
+    max_tool_calls: int = 10
+    max_tool_concurrency: int = 4
+    max_tool_result_items: int = 20
+    event_poll_interval_seconds: float = 0.5
+    sse_heartbeat_seconds: float = 15.0
 
     @field_validator(
         "jwt_public_key_path",
@@ -52,6 +61,11 @@ class Settings(BaseSettings):
         "model_first_token_timeout_seconds",
         "model_request_timeout_seconds",
         "run_timeout_seconds",
+        "rentflow_connect_timeout_seconds",
+        "rentflow_read_timeout_seconds",
+        "tool_timeout_seconds",
+        "event_poll_interval_seconds",
+        "sse_heartbeat_seconds",
     )
     @classmethod
     def positive_timeout(cls, value: float) -> float:
@@ -64,6 +78,18 @@ class Settings(BaseSettings):
     def positive_output_limit(cls, value: int) -> int:
         if value < 1:
             raise ValueError("model_max_output_tokens must be positive")
+        return value
+
+    @field_validator(
+        "max_model_rounds",
+        "max_tool_calls",
+        "max_tool_concurrency",
+        "max_tool_result_items",
+    )
+    @classmethod
+    def positive_limit(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("agent limits must be positive")
         return value
 
     @property

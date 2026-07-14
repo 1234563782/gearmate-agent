@@ -1,0 +1,4 @@
+version = "1.0.0"
+system = "system.md"
+
+fragments = ["fragments/fact_policy.md"]

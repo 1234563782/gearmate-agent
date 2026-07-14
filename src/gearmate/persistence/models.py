@@ -56,6 +56,12 @@ class AgentRun(Base):
             name="ck_agent_runs_status",
         ),
         Index("idx_agent_runs_conversation_created", "conversation_id", "created_at"),
+        Index(
+            ACTIVE_RUN_PARTIAL_UNIQUE_INDEX,
+            "conversation_id",
+            unique=True,
+            postgresql_where=text("status IN ('RUNNING', 'TOOL_REQUESTED')"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
@@ -73,6 +79,21 @@ class AgentRun(Base):
         server_default=text("'{}'::jsonb"),
     )
     error_code: Mapped[str | None] = mapped_column(String(64))
+    stop_reason: Mapped[str | None] = mapped_column(String(64))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    prompt_hash: Mapped[str | None] = mapped_column(String(64))
+    input_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    output_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    model_rounds: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    tool_call_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

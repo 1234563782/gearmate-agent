@@ -1,0 +1,1 @@
+"""Durable SSE event streaming."""
