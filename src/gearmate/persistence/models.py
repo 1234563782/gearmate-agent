@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -118,6 +119,63 @@ class RunEvent(Base):
     sequence_no: Mapped[int] = mapped_column(BigInteger, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+
+class ConversationState(Base):
+    __tablename__ = "conversation_states"
+
+    conversation_id: Mapped[str] = mapped_column(
+        String(26),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    rental_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rental_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attributes: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
+
+
+class ConversationSummary(Base):
+    __tablename__ = "conversation_summaries"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "through_event_id",
+            name="uk_conversation_summaries_boundary",
+        ),
+        Index(
+            "idx_conversation_summaries_conversation_created",
+            "conversation_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(26),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    through_event_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_message_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    estimated_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

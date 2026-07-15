@@ -10,8 +10,11 @@ from gearmate.config import Settings
 from gearmate.llm.factory import build_chat_model
 from gearmate.llm.openai_compatible import ModelConfigurationError
 from gearmate.llm.port import ChatModelPort
+from gearmate.llm.types import ModelUsage
+from gearmate.memory import ConversationMemoryService
 from gearmate.persistence.repositories import AgentRepository
 from gearmate.prompts.loader import RenderedPrompt
+from gearmate.rental_period import RentalPeriodResolver, has_temporal_signal
 from gearmate.rentflow.client import RentFlowClient
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
@@ -34,6 +37,8 @@ class RunCoordinator:
         self._model: ChatModelPort | None = None
         self._model_lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._memory = ConversationMemoryService(repository, settings)
+        self._rental_period_resolver = RentalPeriodResolver()
 
     async def start(
         self,
@@ -45,6 +50,10 @@ class RunCoordinator:
         rental_period: RentalPeriodInput | None,
     ) -> str:
         await self._repository.require_conversation(conversation_id, user_id)
+        if rental_period is not None:
+            await self._memory.remember_rental_period(
+                conversation_id, rental_period
+            )
         run = await self._repository.create_run(
             conversation_id,
             model_provider=self._settings.model_provider,
@@ -106,26 +115,60 @@ class RunCoordinator:
 
         try:
             model = await self._model_client()
+            started = monotonic()
             tools = ToolRegistry(
                 RentFlowClient(self._rentflow_http, access_token),
                 timeout_seconds=self._settings.tool_timeout_seconds,
                 max_result_items=self._settings.max_tool_result_items,
                 max_concurrency=self._settings.max_tool_concurrency,
             )
-            history = await self._repository.conversation_messages(conversation_id)
+            context = await self._memory.build_context(conversation_id)
+            effective_rental_period = rental_period or context.rental_period
+            resolver_usage = ModelUsage()
+            resolver_rounds = 0
+            if rental_period is None and has_temporal_signal(message):
+                resolution = await self._rental_period_resolver.resolve(
+                    message=message,
+                    timezone=context.timezone,
+                    now_utc=context.now_utc,
+                    now_local=context.now_local,
+                    history=context.messages,
+                    model=model,
+                    max_output_tokens=(
+                        self._settings.rental_period_extraction_max_output_tokens
+                    ),
+                )
+                resolver_usage = resolution.usage
+                resolver_rounds = 1
+                if resolution.rental_period is not None:
+                    effective_rental_period = resolution.rental_period
+                    await self._memory.remember_rental_period(
+                        conversation_id, resolution.rental_period
+                    )
+                else:
+                    await self._complete_clarification(
+                        run_id=run_id,
+                        text=resolution.clarification
+                        or "请确认完整的开始和结束时间。",
+                        usage=resolver_usage,
+                        duration_ms=round((monotonic() - started) * 1000),
+                    )
+                    return
             agent = GearMateAgent(model, tools, self._settings, self._prompt)
-            started = monotonic()
             async with asyncio.timeout(self._settings.run_timeout_seconds):
                 result = await agent.run(
                     message=message,
-                    history=history,
-                    rental_period=rental_period,
+                    history=list(context.messages),
+                    rental_period=effective_rental_period,
                     write_event=write_event,
                 )
+            input_tokens = result.input_tokens + resolver_usage.input_tokens
+            output_tokens = result.output_tokens + resolver_usage.output_tokens
+            model_rounds = result.model_rounds + resolver_rounds
             state = {
                 "reply": result.text,
                 "stopReason": result.stop_reason,
-                "modelRounds": result.model_rounds,
+                "modelRounds": model_rounds,
                 "toolCallCount": result.tool_call_count,
                 "durationMs": round((monotonic() - started) * 1000),
             }
@@ -137,11 +180,18 @@ class RunCoordinator:
                 stop_reason=result.stop_reason,
                 error_code=result.error_code,
                 state=state,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                model_rounds=result.model_rounds,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model_rounds=model_rounds,
                 tool_call_count=result.tool_call_count,
             )
+            try:
+                await self._memory.maybe_summarize(conversation_id, model)
+            except Exception:
+                logger.exception(
+                    "Conversation summarization failed (conversation_id=%s)",
+                    conversation_id,
+                )
         except TimeoutError:
             await self._fail(run_id, "TIMEOUT", "RUN_TIMEOUT")
         except ModelConfigurationError:
@@ -152,6 +202,43 @@ class RunCoordinator:
         except Exception:
             logger.exception("Agent run failed (run_id=%s)", run_id)
             await self._fail(run_id, "FAILED", "AGENT_RUN_FAILED")
+
+    async def _complete_clarification(
+        self,
+        *,
+        run_id: str,
+        text: str,
+        usage: ModelUsage,
+        duration_ms: int,
+    ) -> None:
+        await self._repository.append_event(
+            run_id, "assistant.delta", {"content": text}
+        )
+        await self._repository.append_event(
+            run_id,
+            "assistant.completed",
+            {"content": text, "stopReason": "NEED_CLARIFICATION"},
+        )
+        state = {
+            "reply": text,
+            "stopReason": "NEED_CLARIFICATION",
+            "modelRounds": 1,
+            "toolCallCount": 0,
+            "durationMs": duration_ms,
+        }
+        await self._repository.finalize_run(
+            run_id,
+            event_type="run.completed",
+            event_payload=state,
+            status="COMPLETED",
+            stop_reason="NEED_CLARIFICATION",
+            error_code=None,
+            state=state,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            model_rounds=1,
+            tool_call_count=0,
+        )
 
     async def _fail(
         self,

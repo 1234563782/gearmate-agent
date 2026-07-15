@@ -49,14 +49,18 @@ class GearMateAgent:
         self,
         *,
         message: str,
-        history: list[tuple[str, str]],
+        history: list[ModelMessage],
         rental_period: RentalPeriodInput | None,
         write_event: EventWriter,
     ) -> AgentResult:
         facts = FactSnapshot()
         messages = [ModelMessage(role="system", content=self._prompt.content)]
-        messages.extend(ModelMessage(role=role, content=content) for role, content in history)
-        if not history or history[-1] != ("user", message):
+        messages.extend(history)
+        if (
+            not history
+            or history[-1].role != "user"
+            or history[-1].content != message
+        ):
             messages.append(ModelMessage(role="user", content=message))
         if rental_period is not None:
             messages.append(

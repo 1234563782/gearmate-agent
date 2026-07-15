@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     max_tool_result_items: int = 20
     event_poll_interval_seconds: float = 0.5
     sse_heartbeat_seconds: float = 15.0
+    context_history_token_budget: int = 12000
+    context_summary_trigger_tokens: int = 8000
+    context_summary_max_output_tokens: int = 1024
+    context_recent_messages: int = 8
+    context_source_message_limit: int = 100
+    rental_period_extraction_max_output_tokens: int = 512
 
     @field_validator(
         "jwt_public_key_path",
@@ -85,6 +91,12 @@ class Settings(BaseSettings):
         "max_tool_calls",
         "max_tool_concurrency",
         "max_tool_result_items",
+        "context_history_token_budget",
+        "context_summary_trigger_tokens",
+        "context_summary_max_output_tokens",
+        "context_recent_messages",
+        "context_source_message_limit",
+        "rental_period_extraction_max_output_tokens",
     )
     @classmethod
     def positive_limit(cls, value: int) -> int:

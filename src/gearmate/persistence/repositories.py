@@ -2,12 +2,25 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gearmate.ids import new_ulid
-from gearmate.persistence.models import AgentRun, Conversation, RunEvent
+from gearmate.memory import (
+    ConversationMessageMemory,
+    ConversationStateMemory,
+    ConversationSummaryMemory,
+)
+from gearmate.persistence.models import (
+    AgentRun,
+    Conversation,
+    ConversationState,
+    ConversationSummary,
+    RunEvent,
+)
+from gearmate.tools.contracts import RentalPeriodInput
 
 
 class ActiveRunConflict(RuntimeError):
@@ -264,6 +277,171 @@ class AgentRepository:
                 )
                 for event in events
             ]
+
+    async def upsert_conversation_rental_period(
+        self,
+        conversation_id: str,
+        rental_period: RentalPeriodInput,
+    ) -> None:
+        statement = pg_insert(ConversationState).values(
+            conversation_id=conversation_id,
+            rental_start_at=rental_period.start_at,
+            rental_end_at=rental_period.end_at,
+            attributes={},
+        )
+        statement = statement.on_conflict_do_update(
+            index_elements=[ConversationState.conversation_id],
+            set_={
+                "rental_start_at": rental_period.start_at,
+                "rental_end_at": rental_period.end_at,
+                "updated_at": func.current_timestamp(),
+            },
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def conversation_timezone(self, conversation_id: str) -> str:
+        async with self._sessions() as session:
+            timezone = await session.scalar(
+                select(Conversation.timezone).where(
+                    Conversation.id == conversation_id
+                )
+            )
+            if timezone is None:
+                raise LookupError("Conversation not found")
+            return timezone
+
+    async def conversation_state(
+        self, conversation_id: str
+    ) -> ConversationStateMemory | None:
+        async with self._sessions() as session:
+            state = await session.get(ConversationState, conversation_id)
+            if state is None:
+                return None
+            return ConversationStateMemory(
+                rental_start_at=state.rental_start_at,
+                rental_end_at=state.rental_end_at,
+            )
+
+    async def latest_conversation_summary(
+        self, conversation_id: str
+    ) -> ConversationSummaryMemory | None:
+        async with self._sessions() as session:
+            summary = await session.scalar(
+                select(ConversationSummary)
+                .where(ConversationSummary.conversation_id == conversation_id)
+                .order_by(
+                    ConversationSummary.created_at.desc(),
+                    ConversationSummary.id.desc(),
+                )
+                .limit(1)
+            )
+            if summary is None:
+                return None
+            return ConversationSummaryMemory(
+                content=summary.content,
+                through_event_id=summary.through_event_id,
+                source_message_count=summary.source_message_count,
+                estimated_tokens=summary.estimated_tokens,
+                created_at=summary.created_at,
+            )
+
+    async def recent_conversation_messages(
+        self,
+        conversation_id: str,
+        limit: int,
+        after_event_id: str | None = None,
+    ) -> list[ConversationMessageMemory]:
+        async with self._sessions() as session:
+            statement = (
+                select(RunEvent)
+                .join(AgentRun)
+                .where(
+                    AgentRun.conversation_id == conversation_id,
+                    RunEvent.event_type.in_(("user.message", "assistant.completed")),
+                )
+                .order_by(RunEvent.created_at.desc(), RunEvent.id.desc())
+                .limit(limit)
+            )
+            if after_event_id is not None:
+                boundary = await session.get(RunEvent, after_event_id)
+                if boundary is not None:
+                    statement = statement.where(
+                        or_(
+                            RunEvent.created_at > boundary.created_at,
+                            (
+                                (RunEvent.created_at == boundary.created_at)
+                                & (RunEvent.id > boundary.id)
+                            ),
+                        )
+                    )
+            result = await session.scalars(statement)
+            events = list(reversed(list(result)))
+            return [self._memory_message(event) for event in events]
+
+    async def conversation_messages_after(
+        self,
+        conversation_id: str,
+        after_event_id: str | None,
+        limit: int,
+    ) -> list[ConversationMessageMemory]:
+        async with self._sessions() as session:
+            statement = (
+                select(RunEvent)
+                .join(AgentRun)
+                .where(
+                    AgentRun.conversation_id == conversation_id,
+                    RunEvent.event_type.in_(("user.message", "assistant.completed")),
+                )
+                .order_by(RunEvent.created_at, RunEvent.id)
+                .limit(limit)
+            )
+            if after_event_id is not None:
+                boundary = await session.get(RunEvent, after_event_id)
+                if boundary is not None:
+                    statement = statement.where(
+                        or_(
+                            RunEvent.created_at > boundary.created_at,
+                            (
+                                (RunEvent.created_at == boundary.created_at)
+                                & (RunEvent.id > boundary.id)
+                            ),
+                        )
+                    )
+            events = list(await session.scalars(statement))
+            return [self._memory_message(event) for event in events]
+
+    async def save_conversation_summary(
+        self,
+        conversation_id: str,
+        content: str,
+        through_event_id: str,
+        source_message_count: int,
+        estimated_tokens: int,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        summary = ConversationSummary(
+            id=new_ulid(),
+            conversation_id=conversation_id,
+            through_event_id=through_event_id,
+            content=content,
+            source_message_count=source_message_count,
+            estimated_tokens=estimated_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+        async with self._sessions.begin() as session:
+            session.add(summary)
+
+    @staticmethod
+    def _memory_message(event: RunEvent) -> ConversationMessageMemory:
+        return ConversationMessageMemory(
+            event_id=event.id,
+            role="user" if event.event_type == "user.message" else "assistant",
+            content=str(event.payload.get("content") or ""),
+            created_at=event.created_at,
+        )
 
     async def conversation_messages(
         self,
