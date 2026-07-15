@@ -16,6 +16,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from gearmate.persistence.vector import Vector1024
+
 ACTIVE_RUN_STATUSES = frozenset({"RUNNING", "TOOL_REQUESTED"})
 # The first real Alembic revision must create this as a partial unique index.
 ACTIVE_RUN_PARTIAL_UNIQUE_INDEX = "uq_agent_runs_one_active_per_conversation"
@@ -169,6 +171,38 @@ class ConversationSummary(Base):
     input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
     output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+
+class ProductSearchDocument(Base):
+    __tablename__ = "product_search_documents"
+    __table_args__ = (
+        Index("idx_product_search_documents_role", "equipment_role"),
+        Index("idx_product_search_documents_brand", "brand"),
+        Index(
+            "idx_product_search_documents_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+    product_id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    category_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    equipment_role: Mapped[str] = mapped_column(String(64), nullable=False)
+    brand: Mapped[str] = mapped_column(String(128), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector1024(), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
+    indexed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),

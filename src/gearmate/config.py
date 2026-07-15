@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     model_first_token_timeout_seconds: float = 30.0
     model_request_timeout_seconds: float = 120.0
     model_max_output_tokens: int = 4096
+    semantic_search_enabled: bool = False
+    embedding_base_url: str | None = None
+    embedding_model_id: str | None = None
+    embedding_api_key: SecretStr | None = None
+    embedding_dimensions: int = 1024
+    embedding_batch_size: int = 32
+    semantic_search_top_k: int = 20
+    catalog_sync_on_startup: bool = False
     run_timeout_seconds: float = 180.0
     max_model_rounds: int = 6
     max_tool_calls: int = 10
@@ -60,6 +68,9 @@ class Settings(BaseSettings):
         "model_base_url",
         "model_id",
         "model_api_key",
+        "embedding_base_url",
+        "embedding_model_id",
+        "embedding_api_key",
         mode="before",
     )
     @classmethod
@@ -106,11 +117,21 @@ class Settings(BaseSettings):
         "rental_period_extraction_max_output_tokens",
         "requirements_extraction_max_output_tokens",
         "rental_period_max_advance_days",
+        "embedding_dimensions",
+        "embedding_batch_size",
+        "semantic_search_top_k",
     )
     @classmethod
     def positive_limit(cls, value: int) -> int:
         if value < 1:
             raise ValueError("agent limits must be positive")
+        return value
+
+    @field_validator("embedding_dimensions")
+    @classmethod
+    def supported_embedding_dimensions(cls, value: int) -> int:
+        if value != 1024:
+            raise ValueError("embedding_dimensions must match the vector(1024) database column")
         return value
 
     @property

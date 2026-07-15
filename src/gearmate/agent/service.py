@@ -13,6 +13,7 @@ from gearmate.actions import (
     merge_pending_rental_action,
 )
 from gearmate.agent.graph import GearMateAgent
+from gearmate.catalog import CatalogSearchService
 from gearmate.config import Settings
 from gearmate.llm.factory import build_chat_model
 from gearmate.llm.openai_compatible import ModelConfigurationError
@@ -45,11 +46,13 @@ class RunCoordinator:
         repository: AgentRepository,
         rentflow_http: httpx.AsyncClient,
         prompt: RenderedPrompt,
+        catalog_search: CatalogSearchService | None = None,
     ) -> None:
         self._settings = settings
         self._repository = repository
         self._rentflow_http = rentflow_http
         self._prompt = prompt
+        self._catalog_search = catalog_search
         self._model: ChatModelPort | None = None
         self._model_lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -148,6 +151,11 @@ class RunCoordinator:
                 pending_rental_action=context.pending_rental_action,
                 model=model,
                 max_output_tokens=(self._settings.action_resolution_max_output_tokens),
+                catalog_vocabulary=(
+                    await self._catalog_search.vocabulary()
+                    if self._catalog_search is not None
+                    else None
+                ),
             )
             action_usage = action_resolution.usage
             action_rounds = 1
@@ -313,6 +321,7 @@ class RunCoordinator:
                 max_result_items=self._settings.max_tool_result_items,
                 max_concurrency=self._settings.max_tool_concurrency,
                 scenario_plan=scenario_plan,
+                catalog_search=self._catalog_search,
             )
             agent = GearMateAgent(model, tools, self._settings, self._prompt)
             async with asyncio.timeout(self._settings.run_timeout_seconds):

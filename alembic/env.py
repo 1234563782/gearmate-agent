@@ -2,12 +2,16 @@ from asyncio import run
 from logging.config import fileConfig
 
 from sqlalchemy import pool
+from sqlalchemy.dialects.postgresql.base import ischema_names
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from gearmate.config import get_settings
 from gearmate.persistence.models import Base
+from gearmate.persistence.vector import Vector1024
+
+ischema_names["vector"] = Vector1024
 
 config = context.config
 if config.config_file_name is not None:

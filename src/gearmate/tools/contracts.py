@@ -34,6 +34,9 @@ class RentalPeriodInput(ToolModel):
 class ProductSearchInput(ToolModel):
     keyword: str | None = Field(default=None, max_length=128)
     equipment_role: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+    brand: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=64)
+    semantic_query: str | None = Field(default=None, max_length=512)
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     rental_period: RentalPeriodInput | None = None
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
@@ -51,6 +54,18 @@ class ProductSummary(ToolModel):
     daily_rate: str
     fixed_deposit: str
     available_count: int | None = Field(default=None, ge=0)
+
+
+class ProductDetail(ToolModel):
+    product_id: str
+    category_id: str
+    equipment_role: str
+    name: str
+    brand: str
+    model: str
+    description: str
+    daily_rate: str
+    fixed_deposit: str
 
 
 class ProductSearchResult(ToolModel):

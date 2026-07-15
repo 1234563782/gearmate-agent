@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -9,10 +10,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from gearmate import __version__
 from gearmate.agent.service import RunCoordinator
 from gearmate.api.router import api_router
+from gearmate.catalog import CatalogSearchRepository, CatalogSearchService
 from gearmate.config import Settings, get_settings
+from gearmate.embeddings import build_embedding_model
 from gearmate.persistence.database import Database
 from gearmate.persistence.repositories import AgentRepository
 from gearmate.prompts.loader import load_system_prompt
+from gearmate.rentflow.client import RentFlowClient
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -37,19 +43,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             timeout=timeout,
             headers={"Accept": "application/json"},
         )
+        embedding_model = build_embedding_model(resolved_settings)
+        catalog_search = None
+        if embedding_model is not None:
+            catalog_search = CatalogSearchService(
+                CatalogSearchRepository(database.session_factory),
+                embedding_model,
+                batch_size=resolved_settings.embedding_batch_size,
+                top_k=resolved_settings.semantic_search_top_k,
+                max_concurrency=resolved_settings.max_tool_concurrency,
+            )
+            if resolved_settings.catalog_sync_on_startup:
+                try:
+                    stats = await catalog_search.refresh(RentFlowClient(rentflow_http, ""))
+                    logger.info("Catalog semantic index refreshed: %s", stats)
+                except Exception:
+                    logger.exception("Catalog semantic index refresh failed")
         run_coordinator = RunCoordinator(
             resolved_settings,
             repository,
             rentflow_http,
             load_system_prompt(),
+            catalog_search,
         )
         app.state.database = database
         app.state.repository = repository
         app.state.run_coordinator = run_coordinator
+        app.state.catalog_search = catalog_search
         try:
             yield
         finally:
             await run_coordinator.close()
+            if embedding_model is not None:
+                await embedding_model.close()
             await rentflow_http.aclose()
             await database.dispose()
 

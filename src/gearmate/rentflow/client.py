@@ -5,6 +5,7 @@ import httpx
 from gearmate.tools.contracts import (
     AvailabilityInput,
     AvailabilityResult,
+    ProductDetail,
     ProductSearchInput,
     ProductSearchResult,
     QuoteInput,
@@ -28,6 +29,8 @@ class RentFlowClient:
         params: dict[str, Any] = {
             "keyword": request.keyword,
             "equipmentRole": request.equipment_role,
+            "brand": request.brand,
+            "model": request.model,
             "categoryId": request.category_id,
             "maxDailyRate": request.max_daily_rate,
             "page": request.page,
@@ -48,6 +51,10 @@ class RentFlowClient:
             json=request.model_dump(mode="json", by_alias=True),
         )
         return AvailabilityResult.model_validate(self._payload(response))
+
+    async def get_product(self, product_id: str) -> ProductDetail:
+        response = await self._client.get(f"/api/v1/products/{product_id}")
+        return ProductDetail.model_validate(self._payload(response))
 
     async def create_quote(self, request: QuoteInput) -> QuoteResult:
         response = await self._client.post(

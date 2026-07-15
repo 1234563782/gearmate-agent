@@ -14,6 +14,7 @@ from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolCall
 from gearmate.prompts.loader import RenderedPrompt
 from gearmate.requirements import ScenarioPlan
+from gearmate.search import ProductSearchPlanner
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
 from gearmate.validation.facts import FactSnapshot
@@ -132,15 +133,22 @@ class GearMateAgent:
                     )
                 )
         elif action.action == "product_search":
+            plan = ProductSearchPlanner().plan(action)
             arguments = {}
-            if action.keyword:
-                arguments["keyword"] = action.keyword
-            if action.equipment_role:
-                arguments["equipmentRole"] = action.equipment_role
-            if action.category_id:
-                arguments["categoryId"] = action.category_id
-            if action.max_daily_rate is not None:
-                arguments["maxDailyRate"] = str(action.max_daily_rate)
+            if plan.keyword:
+                arguments["keyword"] = plan.keyword
+            if plan.equipment_role:
+                arguments["equipmentRole"] = plan.equipment_role
+            if plan.brand:
+                arguments["brand"] = plan.brand
+            if plan.model:
+                arguments["model"] = plan.model
+            if plan.semantic_query:
+                arguments["semanticQuery"] = plan.semantic_query
+            if plan.category_id:
+                arguments["categoryId"] = plan.category_id
+            if plan.max_daily_rate is not None:
+                arguments["maxDailyRate"] = str(plan.max_daily_rate)
             if rental_period is not None:
                 arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
             automatic_tool_calls.append(

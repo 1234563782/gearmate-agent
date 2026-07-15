@@ -85,6 +85,7 @@ async def test_product_search_is_routed_without_main_model_tool_choice() -> None
         action=AgentAction(
             action="product_search",
             keyword="相机",
+            keyword_specificity="specific",
             equipment_role="camera",
         ),
         write_event=_ignore_event,
@@ -97,6 +98,36 @@ async def test_product_search_is_routed_without_main_model_tool_choice() -> None
     assert tools.calls[0].arguments["equipmentRole"] == "camera"
     assert tools.calls[0].arguments["rentalPeriod"]["startAt"] == ("2026-07-20T00:00:00Z")
     assert "Sony A7M4" in result.text
+
+
+async def test_generic_laptop_search_drops_redundant_keyword() -> None:
+    model = FakeModel()
+    tools = FakeTools()
+
+    await GearMateAgent(
+        model,
+        tools,  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        RenderedPrompt(version="test", content_hash="hash", content="system"),
+    ).run(
+        message="我想租苹果电脑",
+        history=[],
+        rental_period=None,
+        scenario_plan=None,
+        action=AgentAction(
+            action="product_search",
+            keyword="苹果电脑",
+            keyword_specificity="generic",
+            equipment_role="laptop",
+            brand="Apple",
+        ),
+        write_event=_ignore_event,
+    )
+
+    assert len(tools.calls) == 1
+    assert "keyword" not in tools.calls[0].arguments
+    assert tools.calls[0].arguments["equipmentRole"] == "laptop"
+    assert tools.calls[0].arguments["brand"] == "Apple"
 
 
 async def test_availability_without_product_id_clarifies_without_tools() -> None:
@@ -164,6 +195,7 @@ async def test_empty_exact_search_does_not_broaden_results() -> None:
         action=AgentAction(
             action="product_search",
             keyword="单反",
+            keyword_specificity="specific",
             equipment_role="camera",
         ),
         write_event=_ignore_event,

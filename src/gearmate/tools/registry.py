@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -9,6 +10,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from gearmate.catalog import CatalogSearchService
 from gearmate.llm.types import ModelToolCall, ModelToolDefinition
 from gearmate.rentflow.client import RentFlowClient, RentFlowError
 from gearmate.requirements import EquipmentNeed, EquipmentRole, ScenarioPlan
@@ -26,6 +28,7 @@ from gearmate.tools.metadata import ToolDescriptor
 from gearmate.validation.facts import FactSnapshot
 
 EventWriter = Callable[[str, dict[str, Any]], Awaitable[None]]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +48,13 @@ class ToolRegistry:
         max_result_items: int,
         max_concurrency: int,
         scenario_plan: ScenarioPlan | None = None,
+        catalog_search: CatalogSearchService | None = None,
     ) -> None:
         self._rentflow = rentflow
         self._max_result_items = max_result_items
         self._max_concurrency = max_concurrency
         self._scenario_plan = scenario_plan
+        self._catalog_search = catalog_search
         self._cache: dict[str, ToolExecutionResult] = {}
         self._tools = {
             "search_products": ToolDescriptor(
@@ -258,11 +263,29 @@ class ToolRegistry:
         self,
         request: ProductSearchInput,
     ) -> ProductSearchResult:
+        if request.semantic_query and self._catalog_search is not None:
+            try:
+                semantic_result = await self._semantic_products(request)
+                if semantic_result.items:
+                    return semantic_result
+            except Exception:
+                logger.exception("Semantic product search failed; using structured fallback")
         result = await self._rentflow.search_products(request)
-        if request.equipment_role is None:
+        if (
+            request.equipment_role is None
+            and request.brand is None
+            and request.model is None
+        ):
             return result
         matching_items = tuple(
-            item for item in result.items if item.equipment_role == request.equipment_role
+            item
+            for item in result.items
+            if (
+                request.equipment_role is None
+                or item.equipment_role == request.equipment_role
+            )
+            and (request.brand is None or item.brand.casefold() == request.brand.casefold())
+            and (request.model is None or item.model.casefold() == request.model.casefold())
         )
         if len(matching_items) == len(result.items):
             return result
@@ -272,6 +295,54 @@ class ToolRegistry:
                 "total_elements": len(matching_items),
                 "total_pages": 1 if matching_items else 0,
             }
+        )
+
+    async def _semantic_products(self, request: ProductSearchInput) -> ProductSearchResult:
+        catalog_search = self._catalog_search
+        if catalog_search is None or request.semantic_query is None:
+            raise ValueError("Semantic catalog search is not configured")
+        candidates = await catalog_search.search(
+            request.semantic_query,
+            equipment_role=request.equipment_role,
+            brand=request.brand,
+            model=request.model,
+        )
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def hydrate(product_id: str) -> ProductSummary:
+            async with semaphore:
+                detail = await self._rentflow.get_product(product_id)
+                available_count: int | None = None
+                if request.rental_period is not None:
+                    availability = await self._rentflow.search_availability(
+                        AvailabilityInput(
+                            product_id=product_id,
+                            start_at=request.rental_period.start_at,
+                            end_at=request.rental_period.end_at,
+                        )
+                    )
+                    available_count = availability.available_count
+                return ProductSummary(
+                    product_id=detail.product_id,
+                    category_id=detail.category_id,
+                    equipment_role=detail.equipment_role,
+                    name=detail.name,
+                    brand=detail.brand,
+                    model=detail.model,
+                    daily_rate=detail.daily_rate,
+                    fixed_deposit=detail.fixed_deposit,
+                    available_count=available_count,
+                )
+
+        items = tuple(
+            await asyncio.gather(*(hydrate(candidate.product_id) for candidate in candidates))
+        )
+        return ProductSearchResult(
+            items=items,
+            page=0,
+            size=max(1, min(100, self._max_result_items)),
+            total_elements=len(items),
+            total_pages=1 if items else 0,
         )
 
     async def _recommend_scenario_kit(self, request: ScenarioKitInput) -> ScenarioKitResult:

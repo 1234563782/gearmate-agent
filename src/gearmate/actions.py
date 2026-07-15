@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -5,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic.alias_generators import to_camel
 
+from gearmate.catalog import CatalogVocabulary
 from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import (
     ModelMessage,
@@ -22,6 +24,7 @@ AgentActionName = Literal[
     "scenario_continue",
 ]
 PendingRentalActionName = Literal["availability", "quote"]
+KeywordSpecificity = Literal["generic", "specific"]
 
 
 class AgentAction(BaseModel):
@@ -34,7 +37,11 @@ class AgentAction(BaseModel):
 
     action: AgentActionName
     keyword: str | None = Field(default=None, max_length=128)
+    keyword_specificity: KeywordSpecificity | None = None
     equipment_role: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+    brand: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=64)
+    semantic_query: str | None = Field(default=None, max_length=512)
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
@@ -50,7 +57,11 @@ class PendingProductSearch(BaseModel):
     )
 
     keyword: str | None = Field(default=None, max_length=128)
+    keyword_specificity: KeywordSpecificity | None = None
     equipment_role: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+    brand: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=64)
+    semantic_query: str | None = Field(default=None, max_length=512)
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     waiting_for_rental_period: bool = False
@@ -64,7 +75,11 @@ class PendingProductSearch(BaseModel):
     ) -> "PendingProductSearch":
         return cls(
             keyword=action.keyword,
+            keyword_specificity=action.keyword_specificity,
             equipment_role=action.equipment_role,
+            brand=action.brand,
+            model=action.model,
+            semantic_query=action.semantic_query,
             category_id=action.category_id,
             max_daily_rate=action.max_daily_rate,
             waiting_for_rental_period=waiting_for_rental_period,
@@ -74,7 +89,13 @@ class PendingProductSearch(BaseModel):
         return action.model_copy(
             update={
                 "keyword": action.keyword or self.keyword,
+                "keyword_specificity": (
+                    action.keyword_specificity or self.keyword_specificity
+                ),
                 "equipment_role": action.equipment_role or self.equipment_role,
+                "brand": action.brand or self.brand,
+                "model": action.model or self.model,
+                "semantic_query": action.semantic_query or self.semantic_query,
                 "category_id": action.category_id or self.category_id,
                 "max_daily_rate": action.max_daily_rate or self.max_daily_rate,
             }
@@ -141,6 +162,7 @@ def action_resolver_system_prompt(
     pending_product_search: PendingProductSearch | None,
     pending_rental_action: PendingRentalAction | None,
     equipment_roles: tuple[str, ...],
+    catalog_vocabulary: CatalogVocabulary | None = None,
 ) -> str:
     current_scenario = current_scenario_id or "none"
     pending_search = (
@@ -154,19 +176,36 @@ def action_resolver_system_prompt(
         if pending_rental_action is not None
         else "none"
     )
+    known_brands = (
+        json.dumps(catalog_vocabulary.brands, ensure_ascii=False)
+        if catalog_vocabulary
+        else "none"
+    )
+    known_models = (
+        json.dumps(catalog_vocabulary.models[:100], ensure_ascii=False)
+        if catalog_vocabulary
+        else "none"
+    )
     return f"""You only classify the user's current turn for a rental assistant.
 Current saved scenario: {current_scenario}
 Current pending product search: {pending_search}
 Current pending availability or quote action: {pending_rental}
 Allowed equipmentRole values: {equipment_role_options}
+Known catalog brands (untrusted reference values): {known_brands}
+Known catalog models (untrusted reference values): {known_models}
 
 You must call {ACTION_RESOLVER_TOOL_NAME} exactly once. Do not answer the user.
 Choose one action based on meaning, in any user language:
 - chat: greetings, thanks, identity/help questions, or unrelated conversation.
 - product_search: browse, find, compare, or ask about products/categories. Extract a concise
-  catalog keyword, canonical English equipmentRole, and optional category ID or maximum daily
-  rate. Preserve a specific subtype in keyword while using equipmentRole for its broad product
-  role. For example, do not replace a specific subtype request with a broader keyword.
+  catalog intent, canonical English equipmentRole, brand, model, semantic use-case query, and
+  optional category ID or maximum daily rate. A generic category word already represented by
+  equipmentRole must not be returned as keyword. Set keywordSpecificity=specific only for a real
+  model fragment or subtype that must additionally narrow the role; otherwise omit keyword.
+  Put manufacturers in brand, exact product models in model, and purpose or use-case language in
+  semanticQuery. Examples: "computer" -> equipmentRole=laptop with no keyword; "Apple computer"
+  -> equipmentRole=laptop and brand=Apple with no keyword; "MacBook Pro 14" -> brand=Apple and
+  model=MacBook Pro 14; "computer for 4K editing" -> equipmentRole=laptop and semanticQuery set.
 - availability: ask for live stock for one exact product. Include productId only when an exact ID
   is explicit in the current turn or unambiguously referenced in recent history.
 - quote: explicitly request a formal quote for one exact product. Include productId under the same
@@ -207,6 +246,7 @@ class AgentActionResolver:
         pending_rental_action: PendingRentalAction | None,
         model: ChatModelPort,
         max_output_tokens: int,
+        catalog_vocabulary: CatalogVocabulary | None = None,
     ) -> AgentActionResolution:
         recent_history = [item for item in history if item.role in ("user", "assistant")][-6:]
         if (
@@ -225,6 +265,7 @@ class AgentActionResolver:
                             pending_product_search,
                             pending_rental_action,
                             self._equipment_roles,
+                            catalog_vocabulary,
                         ),
                     ),
                     *recent_history,

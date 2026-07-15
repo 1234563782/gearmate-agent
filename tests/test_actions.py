@@ -43,6 +43,7 @@ async def test_resolver_returns_structured_product_search() -> None:
         {
             "action": "product_search",
             "keyword": "单反",
+            "keywordSpecificity": "specific",
             "equipmentRole": "camera",
         }
     )
@@ -60,6 +61,7 @@ async def test_resolver_returns_structured_product_search() -> None:
     assert result.action is not None
     assert result.action.action == "product_search"
     assert result.action.keyword == "单反"
+    assert result.action.keyword_specificity == "specific"
     assert result.action.equipment_role == "camera"
     assert model.requests[0].temperature == 0
     assert model.requests[0].enable_thinking is False
@@ -90,6 +92,7 @@ async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:
 def test_pending_search_merges_only_missing_followup_fields() -> None:
     pending = PendingProductSearch(
         keyword="单反",
+        keyword_specificity="specific",
         equipment_role="camera",
         max_daily_rate="500",
         waiting_for_rental_period=True,
@@ -104,6 +107,7 @@ def test_pending_search_merges_only_missing_followup_fields() -> None:
     )
 
     assert merged.keyword == "单反"
+    assert merged.keyword_specificity == "specific"
     assert merged.equipment_role == "camera"
     assert str(merged.max_daily_rate) == "600"
     assert merged.continues_pending is True

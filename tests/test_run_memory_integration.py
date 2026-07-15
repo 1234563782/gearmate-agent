@@ -258,6 +258,7 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
                         arguments={
                             "action": "product_search",
                             "keyword": "单反",
+                            "keywordSpecificity": "specific",
                             "equipmentRole": "camera",
                         },
                     ),
