@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, cast
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
@@ -20,13 +20,11 @@ class CurrentUser:
 
 
 def _settings(request: Request) -> Settings:
-    return request.app.state.settings
+    return cast(Settings, request.app.state.settings)
 
 
 async def current_user(
-    credentials: Annotated[
-        HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-    ],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[Settings, Depends(_settings)],
 ) -> CurrentUser:
     if credentials is None or credentials.scheme.lower() != "bearer":

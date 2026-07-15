@@ -1,0 +1,164 @@
+common_followup_signals = ["预算", "每天", "日租", "元以内"]
+
+[[scenarios]]
+id = "live_streaming"
+name = "直播设备"
+aliases = ["直播", "推流", "带货", "主播", "live stream", "streaming"]
+
+[[scenarios.fields]]
+name = "streaming_mode"
+question = "使用手机直播还是相机直播"
+kind = "choice"
+required = true
+options = ["mobile", "camera"]
+signals = ["手机", "相机", "摄像机"]
+
+[[scenarios.fields]]
+name = "camera_count"
+question = "需要几个机位"
+kind = "integer"
+minimum = 1
+maximum = 8
+required_when_field = "streaming_mode"
+required_when_equals = "camera"
+signals = ["机位", "台相机", "台摄像机"]
+
+[[scenarios.fields]]
+name = "needs_audio"
+question = "是否需要麦克风收音"
+kind = "boolean"
+required = true
+signals = ["麦克风", "收音", "音频"]
+
+[[scenarios.fields]]
+name = "needs_lighting"
+question = "是否需要补光灯"
+kind = "boolean"
+required = true
+signals = ["补光", "灯光", "灯"]
+
+[[scenarios.equipment]]
+role = "camera"
+keyword = "相机"
+quantity_field = "camera_count"
+include_when_field = "streaming_mode"
+include_when_equals = "camera"
+
+[[scenarios.equipment]]
+role = "lens"
+keyword = "镜头"
+quantity_field = "camera_count"
+include_when_field = "streaming_mode"
+include_when_equals = "camera"
+
+[[scenarios.equipment]]
+role = "capture_card"
+keyword = "采集卡"
+quantity_field = "camera_count"
+include_when_field = "streaming_mode"
+include_when_equals = "camera"
+
+[[scenarios.equipment]]
+role = "tripod"
+keyword = "三脚架"
+quantity_field = "camera_count"
+include_when_field = "streaming_mode"
+include_when_equals = "camera"
+
+[[scenarios.equipment]]
+role = "microphone"
+keyword = "麦克风"
+include_when_field = "needs_audio"
+include_when_equals = true
+
+[[scenarios.equipment]]
+role = "lighting"
+keyword = "补光灯"
+include_when_field = "needs_lighting"
+include_when_equals = true
+
+[[scenarios]]
+id = "event_photography"
+name = "活动拍摄设备"
+aliases = ["活动拍摄", "活动摄影", "婚礼拍摄", "会议拍摄", "event photography"]
+
+[[scenarios.fields]]
+name = "camera_count"
+question = "需要几台相机"
+kind = "integer"
+required = true
+minimum = 1
+maximum = 8
+signals = ["相机", "机位", "几台"]
+
+[[scenarios.fields]]
+name = "needs_lighting"
+question = "是否需要现场补光"
+kind = "boolean"
+required = true
+signals = ["补光", "灯光", "灯"]
+
+[[scenarios.equipment]]
+role = "camera"
+keyword = "相机"
+quantity_field = "camera_count"
+
+[[scenarios.equipment]]
+role = "lens"
+keyword = "镜头"
+quantity_field = "camera_count"
+
+[[scenarios.equipment]]
+role = "tripod"
+keyword = "三脚架"
+quantity_field = "camera_count"
+
+[[scenarios.equipment]]
+role = "lighting"
+keyword = "补光灯"
+include_when_field = "needs_lighting"
+include_when_equals = true
+
+[[scenarios]]
+id = "business_meeting"
+name = "商务会议设备"
+aliases = ["会议设备", "商务会议", "公司会议", "发布会", "business meeting"]
+
+[[scenarios.fields]]
+name = "attendee_count"
+question = "大约有多少参会人"
+kind = "integer"
+required = true
+minimum = 1
+maximum = 1000
+signals = ["人", "参会", "规模"]
+
+[[scenarios.fields]]
+name = "needs_projection"
+question = "是否需要投影或大屏展示"
+kind = "boolean"
+required = true
+signals = ["投影", "大屏", "展示"]
+
+[[scenarios.fields]]
+name = "needs_audio"
+question = "是否需要扩音和麦克风"
+kind = "boolean"
+required = true
+signals = ["麦克风", "扩音", "音响"]
+
+[[scenarios.equipment]]
+role = "laptop"
+keyword = "MacBook"
+
+[[scenarios.equipment]]
+role = "projector"
+keyword = "投影仪"
+include_when_field = "needs_projection"
+include_when_equals = true
+
+[[scenarios.equipment]]
+role = "microphone"
+keyword = "麦克风"
+include_when_field = "needs_audio"
+include_when_equals = true

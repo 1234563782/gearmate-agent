@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -97,14 +97,28 @@ class OpenAICompatibleChatModel:
             )
             for tool in request.tools
         ]
+        extra_body = (
+            {"enable_thinking": request.enable_thinking}
+            if request.enable_thinking is not None
+            else None
+        )
         if tools:
+            tool_choice: object
+            if request.tool_choice in ("auto", "required", "none"):
+                tool_choice = request.tool_choice
+            else:
+                tool_choice = {
+                    "type": "function",
+                    "function": {"name": request.tool_choice},
+                }
             response = await self._client.chat.completions.create(
                 model=self._config.model_id,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto",
+                tool_choice=cast(Any, tool_choice),
                 max_tokens=request.max_output_tokens,
                 temperature=request.temperature,
+                extra_body=extra_body,
             )
         else:
             response = await self._client.chat.completions.create(
@@ -112,10 +126,13 @@ class OpenAICompatibleChatModel:
                 messages=messages,
                 max_tokens=request.max_output_tokens,
                 temperature=request.temperature,
+                extra_body=extra_body,
             )
         choice = response.choices[0]
         tool_calls: list[ModelToolCall] = []
         for call in choice.message.tool_calls or []:
+            if call.type != "function":
+                raise ValueError(f"Model returned unsupported tool call type: {call.type}")
             try:
                 arguments = json.loads(call.function.arguments)
             except json.JSONDecodeError as error:
@@ -130,7 +147,7 @@ class OpenAICompatibleChatModel:
         usage = response.usage
         return ModelResponse(
             text=choice.message.content or "",
-            finish_reason=choice.finish_reason or "unknown",
+            finish_reason=choice.finish_reason,
             usage=ModelUsage(
                 input_tokens=usage.prompt_tokens if usage is not None else 0,
                 output_tokens=usage.completion_tokens if usage is not None else 0,

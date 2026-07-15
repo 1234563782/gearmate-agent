@@ -27,9 +27,7 @@ class Base(DeclarativeBase):
 
 class Conversation(Base):
     __tablename__ = "conversations"
-    __table_args__ = (
-        Index("idx_conversations_user_updated", "user_id", "updated_at"),
-    )
+    __table_args__ = (Index("idx_conversations_user_updated", "user_id", "updated_at"),)
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(26), nullable=False)
@@ -83,15 +81,9 @@ class AgentRun(Base):
     stop_reason: Mapped[str | None] = mapped_column(String(64))
     prompt_version: Mapped[str | None] = mapped_column(String(64))
     prompt_hash: Mapped[str | None] = mapped_column(String(64))
-    input_tokens: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
-    output_tokens: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
-    model_rounds: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    model_rounds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     tool_call_count: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )

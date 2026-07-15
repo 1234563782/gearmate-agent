@@ -5,7 +5,10 @@
 .vscode/
 .DS_Store
 .venv/
+.test-venv/
 .pytest_cache/
+.pytest-tmp/
+.gearmate-*.log
 .mypy_cache/
 .ruff_cache/
 **/__pycache__/

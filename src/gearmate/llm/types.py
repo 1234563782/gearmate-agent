@@ -38,6 +38,8 @@ class ModelRequest(BaseModel):
     max_output_tokens: int = Field(ge=1)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     tools: tuple[ModelToolDefinition, ...] = ()
+    tool_choice: str = "auto"
+    enable_thinking: bool | None = None
 
 
 class ModelUsage(BaseModel):

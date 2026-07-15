@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
@@ -34,11 +34,49 @@ class RentalPeriodResolution:
     usage: ModelUsage
 
 
+class InvalidRentalPeriod(ValueError):
+    pass
+
+
+class RentalPeriodPolicy:
+    def __init__(self, max_advance_days: int) -> None:
+        self._max_advance_days = max_advance_days
+
+    @property
+    def max_advance_days(self) -> int:
+        return self._max_advance_days
+
+    def validate(
+        self,
+        rental_period: RentalPeriodInput,
+        *,
+        now_utc: datetime | None = None,
+    ) -> RentalPeriodInput:
+        reference = now_utc or datetime.now(UTC)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=UTC)
+        reference = reference.astimezone(UTC)
+        start_at = rental_period.start_at.astimezone(UTC)
+        if start_at <= reference:
+            raise InvalidRentalPeriod("租赁开始时间必须晚于当前时间，请重新确认。")
+        latest_start = reference + timedelta(days=self._max_advance_days)
+        if start_at > latest_start:
+            raise InvalidRentalPeriod(
+                f"租赁开始时间不能超过未来 {self._max_advance_days} 天，请重新确认。"
+            )
+        return rental_period
+
+
 def has_temporal_signal(message: str) -> bool:
     return TEMPORAL_SIGNAL.search(message) is not None
 
 
-def resolver_system_prompt(timezone: str, now_utc: datetime, now_local: datetime) -> str:
+def resolver_system_prompt(
+    timezone: str,
+    now_utc: datetime,
+    now_local: datetime,
+    max_advance_days: int,
+) -> str:
     return f"""你只负责从租赁对话中解析明确的开始时间和结束时间。
 可信 UTC 时间: {now_utc.isoformat()}
 用户时区: {timezone}
@@ -50,10 +88,14 @@ def resolver_system_prompt(timezone: str, now_utc: datetime, now_local: datetime
 3. 输出时间必须包含用户时区对应的 UTC offset。
 4. "上午"、"下午"、"晚上"、"周末"等没有具体时分的表达不算完整。
 5. 信息不完整或有多种解释时不要调用工具, 只返回一个简洁的中文确认问题。
-6. 不要搜索商品、查询库存、计算价格或回答其他问题。"""
+6. 不要搜索商品、查询库存、计算价格或回答其他问题。
+7. 租赁开始时间不得超过当前时间之后 {max_advance_days} 天。"""
 
 
 class RentalPeriodResolver:
+    def __init__(self, policy: RentalPeriodPolicy) -> None:
+        self._policy = policy
+
     async def resolve(
         self,
         *,
@@ -65,9 +107,7 @@ class RentalPeriodResolver:
         model: ChatModelPort,
         max_output_tokens: int,
     ) -> RentalPeriodResolution:
-        recent_history = [
-            item for item in history if item.role in ("user", "assistant")
-        ][-6:]
+        recent_history = [item for item in history if item.role in ("user", "assistant")][-6:]
         if (
             not recent_history
             or recent_history[-1].role != "user"
@@ -79,7 +119,10 @@ class RentalPeriodResolver:
                 ModelMessage(
                     role="system",
                     content=resolver_system_prompt(
-                        timezone, now_utc, now_local
+                        timezone,
+                        now_utc,
+                        now_local,
+                        self._policy.max_advance_days,
                     ),
                 ),
                 *recent_history,
@@ -93,6 +136,7 @@ class RentalPeriodResolver:
             ),
             max_output_tokens=max_output_tokens,
             temperature=0.0,
+            enable_thinking=False,
         )
         response = await model.complete(request)
         for call in response.tool_calls:
@@ -108,20 +152,20 @@ class RentalPeriodResolver:
                 )
             zone = ZoneInfo(timezone)
             if (
-                period.start_at.utcoffset()
-                != period.start_at.astimezone(zone).utcoffset()
-                or period.end_at.utcoffset()
-                != period.end_at.astimezone(zone).utcoffset()
+                period.start_at.utcoffset() != period.start_at.astimezone(zone).utcoffset()
+                or period.end_at.utcoffset() != period.end_at.astimezone(zone).utcoffset()
             ):
                 return RentalPeriodResolution(
                     rental_period=None,
                     clarification=f"请按 {timezone} 时区确认开始和结束时间。",
                     usage=response.usage,
                 )
-            if period.start_at <= now_utc:
+            try:
+                self._policy.validate(period, now_utc=now_utc)
+            except InvalidRentalPeriod as error:
                 return RentalPeriodResolution(
                     rental_period=None,
-                    clarification="租赁开始时间必须晚于当前时间, 请重新确认。",
+                    clarification=str(error),
                     usage=response.usage,
                 )
             return RentalPeriodResolution(
@@ -129,9 +173,7 @@ class RentalPeriodResolver:
                 clarification=None,
                 usage=response.usage,
             )
-        clarification = response.text.strip() or (
-            "请确认具体的开始日期时间和结束日期时间。"
-        )
+        clarification = response.text.strip() or ("请确认具体的开始日期时间和结束日期时间。")
         return RentalPeriodResolution(
             rental_period=None,
             clarification=clarification,

@@ -27,7 +27,9 @@ class RentFlowClient:
     async def search_products(self, request: ProductSearchInput) -> ProductSearchResult:
         params: dict[str, Any] = {
             "keyword": request.keyword,
+            "equipmentRole": request.equipment_role,
             "categoryId": request.category_id,
+            "maxDailyRate": request.max_daily_rate,
             "page": request.page,
             "size": request.size,
         }

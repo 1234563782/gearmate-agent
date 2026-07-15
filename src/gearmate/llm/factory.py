@@ -1,9 +1,9 @@
 from gearmate.config import Settings
-from gearmate.llm.port import ChatModelPort
 from gearmate.llm.openai_compatible import (
     OpenAICompatibleChatModel,
     OpenAICompatibleConfig,
 )
+from gearmate.llm.port import ChatModelPort
 
 
 def build_chat_model(settings: Settings) -> ChatModelPort:

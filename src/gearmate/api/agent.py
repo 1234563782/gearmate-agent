@@ -1,7 +1,8 @@
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -11,7 +12,9 @@ from pydantic.alias_generators import to_camel
 
 from gearmate.agent.service import RunCoordinator
 from gearmate.auth.jwt import CurrentUser, current_user
+from gearmate.config import Settings
 from gearmate.persistence.repositories import ActiveRunConflict, AgentRepository
+from gearmate.rental_period import InvalidRentalPeriod
 from gearmate.streaming.sse import encode_event, heartbeat
 from gearmate.tools.contracts import RentalPeriodInput
 
@@ -68,11 +71,11 @@ class RunResponse(ApiModel):
 
 
 def repository(request: Request) -> AgentRepository:
-    return request.app.state.repository
+    return cast(AgentRepository, request.app.state.repository)
 
 
 def coordinator(request: Request) -> RunCoordinator:
-    return request.app.state.run_coordinator
+    return cast(RunCoordinator, request.app.state.run_coordinator)
 
 
 @router.post(
@@ -101,8 +104,7 @@ async def list_conversations(
 ) -> list[ConversationResponse]:
     conversations = await repo.list_conversations(user.user_id)
     return [
-        ConversationResponse.model_validate(item, from_attributes=True)
-        for item in conversations
+        ConversationResponse.model_validate(item, from_attributes=True) for item in conversations
     ]
 
 
@@ -127,8 +129,11 @@ async def create_run(
             rental_period=body.rental_period,
         )
     except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except InvalidRentalPeriod as error:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(error),
         ) from error
     except ActiveRunConflict as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
@@ -144,9 +149,7 @@ async def get_run(
     try:
         run = await repo.require_run(run_id, user.user_id)
     except LookupError as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return RunResponse(
         run_id=run.id,
         conversation_id=run.conversation_id,
@@ -165,9 +168,7 @@ async def cancel_run(
     try:
         run = await repo.require_run(run_id, user.user_id)
     except LookupError as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     if run.status not in TERMINAL_STATUSES:
         await runner.cancel(run_id)
         run = await repo.require_run(run_id, user.user_id)
@@ -191,9 +192,7 @@ async def stream_events(
     try:
         await repo.require_run(run_id, user.user_id)
     except LookupError as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     cursor = after
     if last_event_id is not None:
         try:
@@ -202,9 +201,9 @@ async def stream_events(
             raise HTTPException(
                 status_code=400, detail="Last-Event-ID must be an integer"
             ) from error
-    settings = request.app.state.settings
+    settings = cast(Settings, request.app.state.settings)
 
-    async def event_stream():
+    async def event_stream() -> AsyncIterator[str]:
         nonlocal cursor
         last_heartbeat = monotonic()
         while True:

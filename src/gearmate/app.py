@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -6,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from gearmate import __version__
-from gearmate.api.router import api_router
 from gearmate.agent.service import RunCoordinator
+from gearmate.api.router import api_router
 from gearmate.config import Settings, get_settings
 from gearmate.persistence.database import Database
 from gearmate.persistence.repositories import AgentRepository
@@ -18,7 +19,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(resolved_settings)
         repository = AgentRepository(database.session_factory)
         stale_before = datetime.now(UTC) - timedelta(

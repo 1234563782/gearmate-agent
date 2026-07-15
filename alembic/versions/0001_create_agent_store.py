@@ -7,9 +7,10 @@ Create Date: 2026-07-13
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -38,9 +39,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "idx_conversations_user_updated", "conversations", ["user_id", "updated_at"]
-    )
+    op.create_index("idx_conversations_user_updated", "conversations", ["user_id", "updated_at"])
     op.create_table(
         "agent_runs",
         sa.Column("id", sa.String(length=26), nullable=False),

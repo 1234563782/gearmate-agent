@@ -36,9 +36,7 @@ def upgrade() -> None:
             server_default=sa.func.current_timestamp(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["conversation_id"], ["conversations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("conversation_id"),
     )
     op.create_table(
@@ -57,9 +55,7 @@ def upgrade() -> None:
             server_default=sa.func.current_timestamp(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["conversation_id"], ["conversations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "conversation_id",

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
@@ -6,16 +7,20 @@ from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
 
+from gearmate.actions import AgentAction
 from gearmate.config import Settings
 from gearmate.graph_state import GearMateGraphState
 from gearmate.llm.port import ChatModelPort
-from gearmate.llm.types import ModelMessage, ModelRequest
+from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolCall
 from gearmate.prompts.loader import RenderedPrompt
+from gearmate.requirements import ScenarioPlan
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
 from gearmate.validation.facts import FactSnapshot
 
 EventWriter = Callable[[str, dict[str, Any]], Awaitable[None]]
+AUTOMATIC_SCENARIO_KIT_CALL_ID = "automatic-scenario-kit"
+AUTOMATIC_ACTION_CALL_ID = "automatic-action"
 
 
 AgentState = GearMateGraphState
@@ -51,16 +56,18 @@ class GearMateAgent:
         message: str,
         history: list[ModelMessage],
         rental_period: RentalPeriodInput | None,
+        scenario_plan: ScenarioPlan | None,
+        action: AgentAction,
         write_event: EventWriter,
     ) -> AgentResult:
         facts = FactSnapshot()
+        if scenario_plan is not None and scenario_plan.requirements.daily_budget is not None:
+            facts.add_constraint_amount(scenario_plan.requirements.daily_budget)
+            for need in scenario_plan.equipment_needs:
+                facts.add_constraint_count(need.quantity)
         messages = [ModelMessage(role="system", content=self._prompt.content)]
         messages.extend(history)
-        if (
-            not history
-            or history[-1].role != "user"
-            or history[-1].content != message
-        ):
+        if not history or history[-1].role != "user" or history[-1].content != message:
             messages.append(ModelMessage(role="user", content=message))
         if rental_period is not None:
             messages.append(
@@ -73,32 +80,128 @@ class GearMateAgent:
                     ),
                 )
             )
-
-        async def preprocess(state: AgentState) -> dict[str, Any]:
-            needs_period = any(
-                signal in message.lower()
-                for signal in (
-                    "有货",
-                    "库存",
-                    "可租",
-                    "能租",
-                    "报价",
-                    "多少钱",
-                    "价格",
-                    "费用",
-                    "租金",
-                    "押金",
-                    "quote",
-                    "available",
+        if scenario_plan is not None and scenario_plan.ready:
+            messages.append(
+                ModelMessage(
+                    role="system",
+                    content=(
+                        "本轮已确认的结构化场景需求如下:\n"
+                        + json.dumps(scenario_plan.model_context(), ensure_ascii=False)
+                        + "\n不得把整个场景缩减成单一商品关键词。"
+                        "有每日预算时必须优先调用 recommend_scenario_kit，"
+                        "由工具选择商品并计算组合总价；"
+                        "没有预算时按 equipmentNeeds 中每个角色分别搜索。"
+                    ),
                 )
             )
-            if needs_period and rental_period is None:
+        automatic_tool_calls: list[ModelToolCall] = []
+        if (
+            scenario_plan is not None
+            and scenario_plan.ready
+            and scenario_plan.requirements.daily_budget is not None
+        ):
+            arguments: dict[str, Any] = {}
+            if rental_period is not None:
+                arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
+            automatic_call = ModelToolCall(
+                id=AUTOMATIC_SCENARIO_KIT_CALL_ID,
+                name="recommend_scenario_kit",
+                arguments=arguments,
+            )
+            automatic_tool_calls.append(automatic_call)
+            messages.append(
+                ModelMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=(automatic_call,),
+                )
+            )
+        elif scenario_plan is not None and scenario_plan.ready:
+            for index, need in enumerate(scenario_plan.equipment_needs):
+                arguments = {
+                    "keyword": need.keyword,
+                    "equipmentRole": need.role,
+                }
+                if rental_period is not None:
+                    arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
+                automatic_tool_calls.append(
+                    ModelToolCall(
+                        id=f"automatic-scenario-search-{index}",
+                        name="search_products",
+                        arguments=arguments,
+                    )
+                )
+        elif action.action == "product_search":
+            arguments = {}
+            if action.keyword:
+                arguments["keyword"] = action.keyword
+            if action.equipment_role:
+                arguments["equipmentRole"] = action.equipment_role
+            if action.category_id:
+                arguments["categoryId"] = action.category_id
+            if action.max_daily_rate is not None:
+                arguments["maxDailyRate"] = str(action.max_daily_rate)
+            if rental_period is not None:
+                arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
+            automatic_tool_calls.append(
+                ModelToolCall(
+                    id=AUTOMATIC_ACTION_CALL_ID,
+                    name="search_products",
+                    arguments=arguments,
+                )
+            )
+        elif (
+            action.action in ("availability", "quote")
+            and action.product_id is not None
+            and rental_period is not None
+        ):
+            automatic_tool_calls.append(
+                ModelToolCall(
+                    id=AUTOMATIC_ACTION_CALL_ID,
+                    name=(
+                        "check_availability" if action.action == "availability" else "create_quote"
+                    ),
+                    arguments={
+                        "productId": action.product_id,
+                        "startAt": rental_period.start_at.isoformat(),
+                        "endAt": rental_period.end_at.isoformat(),
+                    },
+                )
+            )
+        if automatic_tool_calls and not any(item.tool_calls for item in messages[-1:]):
+            messages.append(
+                ModelMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=tuple(automatic_tool_calls),
+                )
+            )
+
+        async def preprocess(state: AgentState) -> dict[str, Any]:
+            if action.action in ("availability", "quote") and action.product_id is None:
+                text = "请先指定一个准确的商品 ID，再查询库存或生成正式报价。"
+                await write_event(
+                    "decision.made",
+                    {"outcome": "NEED_CLARIFICATION", "field": "productId"},
+                )
+                return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
+            if action.action in ("availability", "quote") and rental_period is None:
                 text = "请提供完整租期，包括开始时间、结束时间和时区，我再为你查询库存或生成报价。"
                 await write_event(
                     "decision.made",
                     {"outcome": "NEED_CLARIFICATION", "field": "rentalPeriod"},
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
+            if state["pending_tool_calls"]:
+                await write_event(
+                    "decision.made",
+                    {
+                        "outcome": "RUN_TOOLS",
+                        "action": action.action,
+                        "tools": [call.name for call in state["pending_tool_calls"]],
+                    },
+                )
+                return {}
             await write_event("decision.made", {"outcome": "RUN_AGENT"})
             return {}
 
@@ -113,7 +216,7 @@ class GearMateAgent:
             started = monotonic()
             request = ModelRequest(
                 messages=tuple(state["messages"]),
-                tools=self._tools.model_definitions(),
+                tools=(() if action.action == "chat" else self._tools.model_definitions()),
                 max_output_tokens=self._settings.model_max_output_tokens,
             )
             async with asyncio.timeout(self._settings.model_request_timeout_seconds):
@@ -163,11 +266,14 @@ class GearMateAgent:
                 )
                 for result in results
             ]
-            return {
+            update: dict[str, Any] = {
                 "messages": [*state["messages"], *tool_messages],
                 "pending_tool_calls": [],
                 "tool_call_count": next_count,
             }
+            if pending and all(call.id.startswith("automatic-") for call in pending):
+                update["final_text"] = facts.fallback_text()
+            return update
 
         async def validate_output(state: AgentState) -> dict[str, Any]:
             text = (state["final_text"] or "").strip()
@@ -201,8 +307,12 @@ class GearMateAgent:
             )
             return {"final_text": text, "stop_reason": state["stop_reason"] or "COMPLETED"}
 
-        def after_preprocess(state: AgentState) -> Literal["model", "finalize"]:
-            return "finalize" if state["final_text"] else "model"
+        def after_preprocess(
+            state: AgentState,
+        ) -> Literal["model", "tools", "finalize"]:
+            if state["final_text"]:
+                return "finalize"
+            return "tools" if state["pending_tool_calls"] else "model"
 
         def after_model(state: AgentState) -> Literal["tools", "validate"]:
             return "tools" if state["pending_tool_calls"] else "validate"
@@ -225,7 +335,7 @@ class GearMateAgent:
         compiled = graph.compile()
         initial: AgentState = {
             "messages": messages,
-            "pending_tool_calls": [],
+            "pending_tool_calls": automatic_tool_calls,
             "final_text": None,
             "stop_reason": None,
             "error_code": None,

@@ -4,9 +4,12 @@ from math import ceil
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from gearmate.actions import PendingProductSearch, PendingRentalAction
 from gearmate.config import Settings
 from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelUsage
+from gearmate.rental_period import InvalidRentalPeriod, RentalPeriodPolicy
+from gearmate.requirements import RentalRequirements
 from gearmate.tools.contracts import RentalPeriodInput
 
 SUMMARY_SYSTEM_PROMPT = """你负责压缩 GearMate 的较早会话历史。
@@ -30,6 +33,9 @@ TIME_CONTEXT_TEMPLATE = """当前可信时间:
 class ConversationStateMemory:
     rental_start_at: datetime | None
     rental_end_at: datetime | None
+    rental_requirements: RentalRequirements | None = None
+    pending_product_search: PendingProductSearch | None = None
+    pending_rental_action: PendingRentalAction | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,9 +62,29 @@ class MemoryRepository(Protocol):
         self, conversation_id: str, rental_period: RentalPeriodInput
     ) -> None: ...
 
-    async def conversation_state(
-        self, conversation_id: str
-    ) -> ConversationStateMemory | None: ...
+    async def clear_conversation_rental_period(self, conversation_id: str) -> None: ...
+
+    async def upsert_pending_product_search(
+        self,
+        conversation_id: str,
+        pending_search: PendingProductSearch,
+    ) -> None: ...
+
+    async def clear_pending_product_search(self, conversation_id: str) -> None: ...
+
+    async def upsert_pending_rental_action(
+        self,
+        conversation_id: str,
+        pending_action: PendingRentalAction,
+    ) -> None: ...
+
+    async def clear_pending_rental_action(self, conversation_id: str) -> None: ...
+
+    async def upsert_conversation_requirements(
+        self, conversation_id: str, requirements: RentalRequirements
+    ) -> None: ...
+
+    async def conversation_state(self, conversation_id: str) -> ConversationStateMemory | None: ...
 
     async def latest_conversation_summary(
         self, conversation_id: str
@@ -91,6 +117,9 @@ class MemoryRepository(Protocol):
 class ConversationContext:
     messages: tuple[ModelMessage, ...]
     rental_period: RentalPeriodInput | None
+    rental_requirements: RentalRequirements | None
+    pending_product_search: PendingProductSearch | None
+    pending_rental_action: PendingRentalAction | None
     timezone: str
     now_utc: datetime
     now_local: datetime
@@ -106,18 +135,57 @@ class ConversationMemoryService:
     def __init__(self, repository: MemoryRepository, settings: Settings) -> None:
         self._repository = repository
         self._settings = settings
+        self._rental_period_policy = RentalPeriodPolicy(settings.rental_period_max_advance_days)
 
     async def remember_rental_period(
-        self, conversation_id: str, rental_period: RentalPeriodInput
+        self,
+        conversation_id: str,
+        rental_period: RentalPeriodInput,
+        *,
+        now_utc: datetime | None = None,
     ) -> None:
-        await self._repository.upsert_conversation_rental_period(
-            conversation_id, rental_period
+        self._rental_period_policy.validate(rental_period, now_utc=now_utc)
+        await self._repository.upsert_conversation_rental_period(conversation_id, rental_period)
+
+    async def remember_requirements(
+        self, conversation_id: str, requirements: RentalRequirements
+    ) -> None:
+        await self._repository.upsert_conversation_requirements(conversation_id, requirements)
+
+    async def remember_pending_product_search(
+        self,
+        conversation_id: str,
+        pending_search: PendingProductSearch,
+    ) -> None:
+        await self._repository.upsert_pending_product_search(
+            conversation_id,
+            pending_search,
         )
+
+    async def clear_pending_product_search(self, conversation_id: str) -> None:
+        await self._repository.clear_pending_product_search(conversation_id)
+
+    async def remember_pending_rental_action(
+        self,
+        conversation_id: str,
+        pending_action: PendingRentalAction,
+    ) -> None:
+        await self._repository.upsert_pending_rental_action(
+            conversation_id,
+            pending_action,
+        )
+
+    async def clear_pending_rental_action(self, conversation_id: str) -> None:
+        await self._repository.clear_pending_rental_action(conversation_id)
 
     async def build_context(
         self, conversation_id: str, now_utc: datetime | None = None
     ) -> ConversationContext:
         timezone = await self._repository.conversation_timezone(conversation_id)
+        reference_utc = now_utc or datetime.now(UTC)
+        if reference_utc.tzinfo is None:
+            reference_utc = reference_utc.replace(tzinfo=UTC)
+        reference_utc = reference_utc.astimezone(UTC)
         state = await self._repository.conversation_state(conversation_id)
         summary = await self._repository.latest_conversation_summary(conversation_id)
         recent = await self._repository.recent_conversation_messages(
@@ -125,11 +193,6 @@ class ConversationMemoryService:
             self._settings.context_source_message_limit,
             summary.through_event_id if summary is not None else None,
         )
-
-        reference_utc = now_utc or datetime.now(UTC)
-        if reference_utc.tzinfo is None:
-            reference_utc = reference_utc.replace(tzinfo=UTC)
-        reference_utc = reference_utc.astimezone(UTC)
         try:
             zone = ZoneInfo(timezone)
         except ZoneInfoNotFoundError:
@@ -141,9 +204,7 @@ class ConversationMemoryService:
             timezone=timezone,
             now_local=reference_local.isoformat(),
         )
-        messages: list[ModelMessage] = [
-            ModelMessage(role="system", content=time_content)
-        ]
+        messages: list[ModelMessage] = [ModelMessage(role="system", content=time_content)]
         used_tokens = estimate_tokens(time_content)
         if summary is not None:
             summary_content = SUMMARY_CONTEXT_PREFIX + summary.content
@@ -154,15 +215,13 @@ class ConversationMemoryService:
         for item in reversed(recent):
             item_tokens = estimate_tokens(item.content) + 8
             if selected and (
-                used_tokens + item_tokens
-                > self._settings.context_history_token_budget
+                used_tokens + item_tokens > self._settings.context_history_token_budget
             ):
                 break
             selected.append(item)
             used_tokens += item_tokens
         messages.extend(
-            ModelMessage(role=item.role, content=item.content)
-            for item in reversed(selected)
+            ModelMessage(role=item.role, content=item.content) for item in reversed(selected)
         )
 
         rental_period = None
@@ -171,13 +230,22 @@ class ConversationMemoryService:
             and state.rental_start_at is not None
             and state.rental_end_at is not None
         ):
-            rental_period = RentalPeriodInput(
+            stored_period = RentalPeriodInput(
                 start_at=state.rental_start_at,
                 end_at=state.rental_end_at,
             )
+            try:
+                rental_period = self._rental_period_policy.validate(
+                    stored_period, now_utc=reference_utc
+                )
+            except InvalidRentalPeriod:
+                await self._repository.clear_conversation_rental_period(conversation_id)
         return ConversationContext(
             messages=tuple(messages),
             rental_period=rental_period,
+            rental_requirements=(state.rental_requirements if state is not None else None),
+            pending_product_search=(state.pending_product_search if state is not None else None),
+            pending_rental_action=(state.pending_rental_action if state is not None else None),
             timezone=timezone,
             now_utc=reference_utc,
             now_local=reference_local,
@@ -205,27 +273,21 @@ class ConversationMemoryService:
         for item in source[:-keep_recent]:
             item_tokens = estimate_tokens(item.content) + 8
             if candidates and (
-                candidate_tokens + item_tokens
-                > self._settings.context_history_token_budget
+                candidate_tokens + item_tokens > self._settings.context_history_token_budget
             ):
                 break
             candidates.append(item)
             candidate_tokens += item_tokens
         if not candidates:
             return None
-        transcript = "\n".join(
-            f"{item.role}: {item.content}" for item in candidates
-        )
+        transcript = "\n".join(f"{item.role}: {item.content}" for item in candidates)
         previous_text = previous.content if previous is not None else "(无)"
         request = ModelRequest(
             messages=(
                 ModelMessage(role="system", content=SUMMARY_SYSTEM_PROMPT),
                 ModelMessage(
                     role="user",
-                    content=(
-                        f"已有摘要:\n{previous_text}\n\n"
-                        f"需要合并的新对话:\n{transcript}"
-                    ),
+                    content=(f"已有摘要:\n{previous_text}\n\n需要合并的新对话:\n{transcript}"),
                 ),
             ),
             max_output_tokens=self._settings.context_summary_max_output_tokens,

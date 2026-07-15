@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     rentflow_connect_timeout_seconds: float = 5.0
     rentflow_read_timeout_seconds: float = 20.0
     tool_timeout_seconds: float = 30.0
+    catalog_equipment_roles: str = (
+        "action_camera,camera,capture_card,drone,laptop,lens,lighting,microphone,tripod"
+    )
     jwt_public_key_path: Path | None = None
     jwt_issuer: str = "rentflow-server"
     jwt_audience: str = "rentflow-platform"
@@ -47,7 +50,10 @@ class Settings(BaseSettings):
     context_summary_max_output_tokens: int = 1024
     context_recent_messages: int = 8
     context_source_message_limit: int = 100
+    action_resolution_max_output_tokens: int = 256
     rental_period_extraction_max_output_tokens: int = 512
+    requirements_extraction_max_output_tokens: int = 512
+    rental_period_max_advance_days: int = 90
 
     @field_validator(
         "jwt_public_key_path",
@@ -96,7 +102,10 @@ class Settings(BaseSettings):
         "context_summary_max_output_tokens",
         "context_recent_messages",
         "context_source_message_limit",
+        "action_resolution_max_output_tokens",
         "rental_period_extraction_max_output_tokens",
+        "requirements_extraction_max_output_tokens",
+        "rental_period_max_advance_days",
     )
     @classmethod
     def positive_limit(cls, value: int) -> int:
@@ -107,9 +116,13 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> tuple[str, ...]:
         return tuple(
-            origin.strip()
-            for origin in self.cors_allowed_origins.split(",")
-            if origin.strip()
+            origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()
+        )
+
+    @property
+    def equipment_roles(self) -> tuple[str, ...]:
+        return tuple(
+            role.strip() for role in self.catalog_equipment_roles.split(",") if role.strip()
         )
 
 
