@@ -120,6 +120,39 @@ async def test_resolver_receives_database_catalog_aliases() -> None:
     assert '"canonicalValue": "Apple"' in prompt
 
 
+async def test_resolver_maps_dynamic_use_case_alias_without_hardcoded_values() -> None:
+    model = FakeModel(
+        {
+            "action": "product_search",
+            "equipmentRole": "laptop",
+            "semanticQuery": "适合做后期的电脑",
+        }
+    )
+
+    result = await AgentActionResolver(("laptop",)).resolve(
+        message="我想租一台做后期的电脑",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+        catalog_vocabulary=CatalogVocabulary(
+            aliases=(
+                CatalogAliasTerm(
+                    "后期",
+                    "use_case",
+                    "01J00000000000000000000202",
+                ),
+            )
+        ),
+    )
+
+    assert result.action is not None
+    assert result.action.use_case_id == "01J00000000000000000000202"
+    assert result.action.semantic_query == "适合做后期的电脑"
+
+
 async def test_resolver_maps_recent_product_position_to_authoritative_id() -> None:
     model = FakeModel(
         {

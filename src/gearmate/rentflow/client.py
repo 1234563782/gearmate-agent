@@ -5,6 +5,7 @@ import httpx
 from gearmate.tools.contracts import (
     AvailabilityInput,
     AvailabilityResult,
+    CatalogUseCase,
     ProductDetail,
     ProductSearchInput,
     ProductSearchResult,
@@ -31,6 +32,7 @@ class RentFlowClient:
             "equipmentRole": request.equipment_role,
             "brand": request.brand,
             "model": request.model,
+            "useCaseId": request.use_case_id,
             "categoryId": request.category_id,
             "maxDailyRate": request.max_daily_rate,
             "page": request.page,
@@ -44,6 +46,10 @@ class RentFlowClient:
             params={key: value for key, value in params.items() if value is not None},
         )
         return ProductSearchResult.model_validate(self._payload(response))
+
+    async def list_use_cases(self) -> tuple[CatalogUseCase, ...]:
+        response = await self._client.get("/api/v1/catalog/use-cases")
+        return tuple(CatalogUseCase.model_validate(item) for item in self._payload(response))
 
     async def search_availability(self, request: AvailabilityInput) -> AvailabilityResult:
         response = await self._client.post(

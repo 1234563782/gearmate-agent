@@ -12,7 +12,7 @@ from gearmate.validation.facts import FactSnapshot
 
 
 class FakeSemanticCatalog:
-    async def search(self, query, *, equipment_role, brand, model):
+    async def search(self, query, *, equipment_role, brand, model, use_case_id=None):
         assert query == "适合剪视频的电脑"
         assert equipment_role == "laptop"
         assert brand == "Apple"
@@ -28,7 +28,7 @@ class FakeSemanticCatalog:
 
 
 class FailingSemanticCatalog:
-    async def search(self, query, *, equipment_role, brand, model):
+    async def search(self, query, *, equipment_role, brand, model, use_case_id=None):
         raise RuntimeError("embedding service unavailable")
 
 

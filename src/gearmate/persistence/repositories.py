@@ -626,14 +626,32 @@ class AgentRepository:
                 .join(AgentRun)
                 .where(
                     AgentRun.conversation_id == conversation_id,
-                    RunEvent.event_type.in_(("user.message", "assistant.completed")),
+                    RunEvent.event_type.in_(
+                        ("user.message", "assistant.completed", "recommendation.presented")
+                    ),
                 )
                 .order_by(RunEvent.created_at.desc(), RunEvent.sequence_no.desc())
                 .limit(limit)
             )
             rows = list(reversed(list(events)))
-            return [
-                self._memory_message(event)
+            presentations = {
+                event.run_id: event.payload
                 for event in rows
-                if event.payload.get("content")
+                if event.event_type == "recommendation.presented"
+            }
+            return [
+                ConversationMessageMemory(
+                    event_id=event.id,
+                    role="user" if event.event_type == "user.message" else "assistant",
+                    content=str(event.payload.get("content") or ""),
+                    created_at=event.created_at,
+                    presentation=(
+                        presentations.get(event.run_id)
+                        if event.event_type == "assistant.completed"
+                        else None
+                    ),
+                )
+                for event in rows
+                if event.event_type in ("user.message", "assistant.completed")
+                and event.payload.get("content")
             ]

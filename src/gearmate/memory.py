@@ -55,6 +55,7 @@ class ConversationMessageMemory:
     role: Literal["user", "assistant"]
     content: str
     created_at: datetime
+    presentation: dict[str, object] | None = None
 
 
 class MemoryRepository(Protocol):

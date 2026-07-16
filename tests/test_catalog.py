@@ -4,7 +4,13 @@ from gearmate.catalog import (
     CatalogVocabulary,
     SemanticProductCandidate,
 )
-from gearmate.tools.contracts import ProductDetail, ProductSearchResult, ProductSummary
+from gearmate.tools.contracts import (
+    CatalogUseCase,
+    ProductDetail,
+    ProductSearchResult,
+    ProductSummary,
+    ProductUseCase,
+)
 
 
 class FakeEmbeddings:
@@ -28,6 +34,7 @@ class FakeCatalogRepository:
         self.upserts = []
         self.search_arguments: dict[str, object] | None = None
         self.vector_score = vector_score
+        self.synced_use_cases: tuple[CatalogUseCase, ...] = ()
 
     async def content_hashes(self) -> dict[str, str]:
         return dict(self.hashes)
@@ -35,6 +42,9 @@ class FakeCatalogRepository:
     async def upsert(self, document, embedding_model, embedding) -> None:
         self.upserts.append((document, embedding_model, embedding))
         self.hashes[document.product_id] = document.content_hash
+
+    async def sync_use_cases(self, use_cases: tuple[CatalogUseCase, ...]) -> None:
+        self.synced_use_cases = use_cases
 
     async def deactivate_missing(self, active_product_ids: set[str]) -> int:
         return 0
@@ -54,6 +64,7 @@ class FakeCatalogRepository:
         equipment_role,
         brand,
         model,
+        use_case_id,
         limit,
     ) -> tuple[SemanticProductCandidate, ...]:
         self.search_arguments = {
@@ -62,6 +73,7 @@ class FakeCatalogRepository:
             "equipment_role": equipment_role,
             "brand": brand,
             "model": model,
+            "use_case_id": use_case_id,
             "limit": limit,
         }
         return (
@@ -75,6 +87,17 @@ class FakeCatalogRepository:
 
 
 class FakeRentFlowCatalog:
+    async def list_use_cases(self) -> tuple[CatalogUseCase, ...]:
+        return (
+            CatalogUseCase(
+                id="01J00000000000000000000202",
+                code="video_editing",
+                name="视频剪辑",
+                description="视频素材剪辑和移动后期制作",
+                aliases=("剪辑", "后期"),
+            ),
+        )
+
     async def search_products(self, request) -> ProductSearchResult:
         return ProductSearchResult(
             items=(
@@ -106,6 +129,14 @@ class FakeRentFlowCatalog:
             description="Portable computer for video editing",
             daily_rate="160.00",
             fixed_deposit="1200.00",
+            use_cases=(
+                ProductUseCase(
+                    id="01J00000000000000000000202",
+                    code="video_editing",
+                    name="视频剪辑",
+                    weight="0.98",
+                ),
+            ),
         )
 
 
@@ -132,6 +163,8 @@ async def test_catalog_refresh_embeds_only_changed_products() -> None:
     assert len(embeddings.requests) == 1
     assert repository.upserts[0][1] == "test-embedding"
     assert "MacBook Pro 14" in repository.upserts[0][0].search_text
+    assert "video_editing: 视频剪辑" in repository.upserts[0][0].search_text
+    assert repository.synced_use_cases[0].code == "video_editing"
 
 
 async def test_semantic_search_keeps_structured_filters() -> None:
@@ -162,6 +195,7 @@ async def test_semantic_search_keeps_structured_filters() -> None:
         "equipment_role": "laptop",
         "brand": "Apple",
         "model": None,
+        "use_case_id": None,
         "limit": 36,
     }
     assert candidates[0].vector_score == 0.91

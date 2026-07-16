@@ -55,6 +55,7 @@ class ConversationMessageResponse(ApiModel):
     role: str
     content: str
     created_at: datetime
+    presentation: dict[str, object] | None = None
 
 
 class CreateRunRequest(ApiModel):
@@ -136,6 +137,7 @@ async def list_conversation_messages(
             role=message.role,
             content=message.content,
             created_at=message.created_at,
+            presentation=message.presentation,
         )
         for message in messages
     ]

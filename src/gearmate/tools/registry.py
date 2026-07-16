@@ -16,11 +16,13 @@ from gearmate.rentflow.client import RentFlowClient, RentFlowError
 from gearmate.requirements import EquipmentNeed, EquipmentRole, ScenarioPlan
 from gearmate.tools.contracts import (
     AvailabilityInput,
+    AvailabilityResult,
     ProductDetailInput,
     ProductSearchInput,
     ProductSearchResult,
     ProductSummary,
     QuoteInput,
+    QuoteResult,
     ScenarioKitInput,
     ScenarioKitItem,
     ScenarioKitResult,
@@ -58,6 +60,8 @@ class ToolRegistry:
         self._catalog_search = catalog_search
         self._last_search_diagnostics: dict[str, Any] | None = None
         self._last_product_search_result: ProductSearchResult | None = None
+        self._last_availability_result: AvailabilityResult | None = None
+        self._last_quote_result: QuoteResult | None = None
         self._cache: dict[str, ToolExecutionResult] = {}
         self._tools = {
             "search_products": ToolDescriptor(
@@ -122,6 +126,14 @@ class ToolRegistry:
     @property
     def last_product_search_result(self) -> ProductSearchResult | None:
         return self._last_product_search_result
+
+    @property
+    def last_availability_result(self) -> AvailabilityResult | None:
+        return self._last_availability_result
+
+    @property
+    def last_quote_result(self) -> QuoteResult | None:
+        return self._last_quote_result
 
     def model_definitions(self) -> tuple[ModelToolDefinition, ...]:
         return tuple(
@@ -232,6 +244,10 @@ class ToolRegistry:
                 visible_payload["items"] = items[: descriptor.max_result_items]
                 truncated = len(items) > descriptor.max_result_items
             visible_result = type(result).model_validate(visible_payload)
+            if isinstance(visible_result, AvailabilityResult):
+                self._last_availability_result = visible_result
+            elif isinstance(visible_result, QuoteResult):
+                self._last_quote_result = visible_result
             await write_event(
                 "tool.completed",
                 {
@@ -311,7 +327,12 @@ class ToolRegistry:
             "mode": "structured_fallback" if semantic_attempted else "structured",
             "resultCount": len(result.items),
         }
-        if request.equipment_role is None and request.brand is None and request.model is None:
+        if (
+            request.equipment_role is None
+            and request.brand is None
+            and request.model is None
+            and request.use_case_id is None
+        ):
             self._last_product_search_result = result
             return result
         matching_items = tuple(
@@ -320,6 +341,10 @@ class ToolRegistry:
             if (request.equipment_role is None or item.equipment_role == request.equipment_role)
             and (request.brand is None or item.brand.casefold() == request.brand.casefold())
             and (request.model is None or item.model.casefold() == request.model.casefold())
+            and (
+                request.use_case_id is None
+                or any(use_case.id == request.use_case_id for use_case in item.use_cases)
+            )
         )
         if len(matching_items) == len(result.items):
             self._last_product_search_result = result
@@ -346,10 +371,12 @@ class ToolRegistry:
             equipment_role=request.equipment_role,
             brand=request.brand,
             model=request.model,
+            use_case_id=request.use_case_id,
         )
         self._last_search_diagnostics = {
             "mode": "semantic",
             "semanticQuery": request.semantic_query,
+            **({"useCaseId": request.use_case_id} if request.use_case_id else {}),
             "candidateCount": len(candidates),
             "candidates": [
                 {
@@ -386,6 +413,7 @@ class ToolRegistry:
                     daily_rate=detail.daily_rate,
                     fixed_deposit=detail.fixed_deposit,
                     available_count=available_count,
+                    use_cases=detail.use_cases,
                 )
 
         items = tuple(

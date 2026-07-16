@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from gearmate.actions import AgentAction
-from gearmate.tools.contracts import ProductSearchResult
+from gearmate.tools.contracts import ProductSearchResult, ProductUseCase
 
 
 class RecentProductReference(BaseModel):
@@ -22,6 +22,9 @@ class RecentProductReference(BaseModel):
     brand: str
     model: str
     equipment_role: str
+    daily_rate: str | None = None
+    fixed_deposit: str | None = None
+    use_cases: tuple[ProductUseCase, ...] = ()
 
 
 class RecentProductSearch(BaseModel):
@@ -45,6 +48,9 @@ class RecentProductSearch(BaseModel):
                     brand=item.brand,
                     model=item.model,
                     equipment_role=item.equipment_role,
+                    daily_rate=item.daily_rate,
+                    fixed_deposit=item.fixed_deposit,
+                    use_cases=item.use_cases,
                 )
                 for index, item in enumerate(result.items, start=1)
             )
@@ -58,6 +64,7 @@ class ProductSearchPlan:
     brand: str | None
     model: str | None
     semantic_query: str | None
+    use_case_id: str | None
     category_id: str | None
     max_daily_rate: Decimal | None
 
@@ -75,6 +82,7 @@ class ProductSearchPlanner:
             brand=action.brand,
             model=action.model,
             semantic_query=action.semantic_query,
+            use_case_id=action.use_case_id,
             category_id=action.category_id,
             max_daily_rate=action.max_daily_rate,
         )

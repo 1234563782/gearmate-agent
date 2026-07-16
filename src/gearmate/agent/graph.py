@@ -145,6 +145,8 @@ class GearMateAgent:
                 arguments["model"] = plan.model
             if plan.semantic_query:
                 arguments["semanticQuery"] = plan.semantic_query
+            if plan.use_case_id:
+                arguments["useCaseId"] = plan.use_case_id
             if plan.category_id:
                 arguments["categoryId"] = plan.category_id
             if plan.max_daily_rate is not None:

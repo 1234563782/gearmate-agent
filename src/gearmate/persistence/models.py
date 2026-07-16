@@ -186,6 +186,11 @@ class ProductSearchDocument(Base):
         Index("idx_product_search_documents_role", "equipment_role"),
         Index("idx_product_search_documents_brand", "brand"),
         Index(
+            "idx_product_search_documents_use_cases",
+            "use_case_ids",
+            postgresql_using="gin",
+        ),
+        Index(
             "idx_product_search_documents_embedding_hnsw",
             "embedding",
             postgresql_using="hnsw",
@@ -200,6 +205,11 @@ class ProductSearchDocument(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    use_case_ids: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
     search_text: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -216,7 +226,7 @@ class CatalogAlias(Base):
     __tablename__ = "catalog_aliases"
     __table_args__ = (
         CheckConstraint(
-            "entity_type IN ('equipment_role', 'brand', 'model')",
+            "entity_type IN ('equipment_role', 'brand', 'model', 'use_case')",
             name="ck_catalog_aliases_entity_type",
         ),
         Index("idx_catalog_aliases_active", "active"),

@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from gearmate.embeddings import EmbeddingPort
 from gearmate.persistence.models import CatalogAlias, ProductSearchDocument
 from gearmate.rentflow.client import RentFlowClient
-from gearmate.tools.contracts import ProductDetail, ProductSearchInput, ProductSummary
+from gearmate.tools.contracts import (
+    CatalogUseCase,
+    ProductDetail,
+    ProductSearchInput,
+    ProductSummary,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +27,7 @@ class CatalogDocument:
     model: str
     name: str
     description: str
+    use_case_ids: tuple[str, ...]
     search_text: str
     content_hash: str
 
@@ -40,6 +46,17 @@ class CatalogVocabulary:
     brands: tuple[str, ...] = ()
     models: tuple[str, ...] = ()
     aliases: tuple["CatalogAliasTerm", ...] = ()
+
+    def matching_use_case_ids(self, text_value: str) -> tuple[str, ...]:
+        normalized = text_value.casefold()
+        return tuple(
+            dict.fromkeys(
+                item.canonical_value
+                for item in self.aliases
+                if item.entity_type == "use_case"
+                and item.alias.casefold() in normalized
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +97,12 @@ class CatalogSearchRepository:
             """
             INSERT INTO product_search_documents (
                 product_id, category_id, equipment_role, brand, model, name, description,
-                search_text, content_hash, embedding_model, embedding, active, indexed_at
+                use_case_ids, search_text, content_hash, embedding_model, embedding, active,
+                indexed_at
             ) VALUES (
                 :product_id, :category_id, :equipment_role, :brand, :model, :name, :description,
-                :search_text, :content_hash, :embedding_model, CAST(:embedding AS vector),
-                true, CURRENT_TIMESTAMP
+                CAST(:use_case_ids AS jsonb), :search_text, :content_hash, :embedding_model,
+                CAST(:embedding AS vector), true, CURRENT_TIMESTAMP
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 category_id = EXCLUDED.category_id,
@@ -93,6 +111,7 @@ class CatalogSearchRepository:
                 model = EXCLUDED.model,
                 name = EXCLUDED.name,
                 description = EXCLUDED.description,
+                use_case_ids = EXCLUDED.use_case_ids,
                 search_text = EXCLUDED.search_text,
                 content_hash = EXCLUDED.content_hash,
                 embedding_model = EXCLUDED.embedding_model,
@@ -103,11 +122,48 @@ class CatalogSearchRepository:
         )
         parameters = {
             **asdict(document),
+            "use_case_ids": json.dumps(document.use_case_ids, separators=(",", ":")),
             "embedding_model": embedding_model,
             "embedding": json.dumps(embedding, separators=(",", ":")),
         }
         async with self._sessions.begin() as session:
             await session.execute(statement, parameters)
+
+    async def sync_use_cases(self, use_cases: tuple[CatalogUseCase, ...]) -> None:
+        terms = tuple(
+            (alias, use_case.id)
+            for use_case in use_cases
+            for alias in dict.fromkeys((use_case.name, use_case.code, *use_case.aliases))
+        )
+        statement = text(
+            """
+            INSERT INTO catalog_aliases (
+                alias, entity_type, canonical_value, locale, source, active, updated_at
+            ) VALUES (
+                :alias, 'use_case', :canonical_value, 'und', 'rentflow', true,
+                CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (alias, entity_type) DO UPDATE SET
+                canonical_value = EXCLUDED.canonical_value,
+                source = EXCLUDED.source,
+                active = true,
+                updated_at = CURRENT_TIMESTAMP
+            """
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(
+                update(CatalogAlias)
+                .where(
+                    CatalogAlias.entity_type == "use_case",
+                    CatalogAlias.source == "rentflow",
+                )
+                .values(active=False)
+            )
+            for alias, canonical_value in terms:
+                await session.execute(
+                    statement,
+                    {"alias": alias, "canonical_value": canonical_value},
+                )
 
     async def deactivate_missing(self, active_product_ids: set[str]) -> int:
         statement = update(ProductSearchDocument).where(ProductSearchDocument.active.is_(True))
@@ -175,6 +231,7 @@ class CatalogSearchRepository:
         equipment_role: str | None,
         brand: str | None,
         model: str | None,
+        use_case_id: str | None,
         limit: int,
     ) -> tuple[SemanticProductCandidate, ...]:
         filters = ["active = true"]
@@ -193,6 +250,9 @@ class CatalogSearchRepository:
         if model is not None:
             filters.append("LOWER(model) = LOWER(:model)")
             parameters["model"] = model
+        if use_case_id is not None:
+            filters.append("use_case_ids @> CAST(:use_case_ids AS jsonb)")
+            parameters["use_case_ids"] = json.dumps([use_case_id])
         statement = text(
             "SELECT product_id, "
             "1 - (embedding <=> CAST(:embedding AS vector)) AS vector_score, "
@@ -242,6 +302,8 @@ class CatalogSearchService:
         self._lexical_weight = lexical_weight
 
     async def refresh(self, rentflow: RentFlowClient) -> CatalogIndexStats:
+        use_cases = await rentflow.list_use_cases()
+        await self._repository.sync_use_cases(use_cases)
         summaries: list[ProductSummary] = []
         page = 0
         while True:
@@ -293,6 +355,7 @@ class CatalogSearchService:
         equipment_role: str | None,
         brand: str | None,
         model: str | None,
+        use_case_id: str | None = None,
     ) -> tuple[SemanticProductCandidate, ...]:
         embeddings = await self._embeddings.embed((query,))
         candidates = await self._repository.semantic_search(
@@ -301,6 +364,7 @@ class CatalogSearchService:
             equipment_role=equipment_role,
             brand=brand,
             model=model,
+            use_case_id=use_case_id,
             limit=min(100, self._top_k * 3),
         )
         ranked = [
@@ -320,6 +384,9 @@ class CatalogSearchService:
         return tuple(ranked[: self._top_k])
 
     def _document(self, product: ProductDetail) -> CatalogDocument:
+        use_case_text = "; ".join(
+            f"{item.code}: {item.name}" for item in product.use_cases
+        )
         search_text = "\n".join(
             (
                 f"equipment role: {product.equipment_role}",
@@ -327,6 +394,7 @@ class CatalogSearchService:
                 f"model: {product.model}",
                 f"name: {product.name}",
                 f"description: {product.description}",
+                f"use cases: {use_case_text}",
             )
         )
         content_hash = hashlib.sha256(
@@ -340,6 +408,7 @@ class CatalogSearchService:
             model=product.model,
             name=product.name,
             description=product.description,
+            use_case_ids=tuple(item.id for item in product.use_cases),
             search_text=search_text,
             content_hash=content_hash,
         )

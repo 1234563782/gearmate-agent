@@ -22,6 +22,7 @@ from gearmate.llm.types import ModelUsage
 from gearmate.memory import ConversationMemoryService
 from gearmate.persistence.repositories import AgentRepository
 from gearmate.prompts.loader import RenderedPrompt
+from gearmate.recommendations import RecommendationPlanner
 from gearmate.rental_period import (
     RentalPeriodPolicy,
     RentalPeriodResolver,
@@ -348,11 +349,52 @@ class RunCoordinator:
                 )
             if tools.last_search_diagnostics is not None:
                 await write_event("search.retrieval", tools.last_search_diagnostics)
+            presentation_payload: dict[str, Any] | None = None
             if action.action == "product_search" and tools.last_product_search_result is not None:
+                presentation = RecommendationPlanner().plan(
+                    tools.last_product_search_result,
+                    action,
+                    effective_rental_period,
+                )
+                presentation_payload = presentation.model_dump(mode="json", by_alias=True)
+                await write_event("recommendation.presented", presentation_payload)
                 await self._memory.remember_recent_product_search(
                     conversation_id,
                     RecentProductSearch.from_result(tools.last_product_search_result),
                 )
+            elif (
+                action.action in ("availability", "quote")
+                and action.product_id is not None
+                and effective_rental_period is not None
+                and context.recent_product_search is not None
+                and (
+                    tools.last_availability_result is not None
+                    or tools.last_quote_result is not None
+                )
+            ):
+                product = next(
+                    (
+                        item
+                        for item in context.recent_product_search.items
+                        if item.product_id == action.product_id
+                    ),
+                    None,
+                )
+                if product is not None:
+                    exact_presentation = RecommendationPlanner().plan_exact(
+                        product,
+                        effective_rental_period,
+                        (
+                            tools.last_availability_result.available_count
+                            if tools.last_availability_result is not None
+                            else None
+                        ),
+                    )
+                    if exact_presentation is not None:
+                        presentation_payload = exact_presentation.model_dump(
+                            mode="json", by_alias=True
+                        )
+                        await write_event("recommendation.presented", presentation_payload)
             if action.action == "product_search" and result.tool_call_count > 0:
                 await self._memory.clear_pending_product_search(conversation_id)
             if action.action in ("availability", "quote") and result.tool_call_count > 0:
@@ -371,6 +413,7 @@ class RunCoordinator:
                 "modelRounds": model_rounds,
                 "toolCallCount": result.tool_call_count,
                 "durationMs": round((monotonic() - started) * 1000),
+                **({"presentation": presentation_payload} if presentation_payload else {}),
             }
             await self._repository.finalize_run(
                 run_id,

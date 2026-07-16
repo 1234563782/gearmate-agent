@@ -47,13 +47,15 @@ async def test_list_conversation_messages_returns_owned_history() -> None:
             "id": "event-1",
             "role": "user",
             "content": "我想租相机",
-            "createdAt": created_at,
+                "createdAt": created_at,
+                "presentation": None,
         },
         {
             "id": "event-2",
             "role": "assistant",
             "content": "可以看看 Sony A7M4。",
-            "createdAt": created_at,
+                "createdAt": created_at,
+                "presentation": None,
         },
     ]
 

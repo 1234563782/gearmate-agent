@@ -17,7 +17,7 @@ from gearmate.llm.types import (
 from gearmate.memory import ConversationMessageMemory, ConversationStateMemory
 from gearmate.prompts.loader import RenderedPrompt
 from gearmate.requirements import RentalRequirements
-from gearmate.search import RecentProductSearch
+from gearmate.search import RecentProductReference, RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 
 
@@ -347,8 +347,8 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
                         id="period-confirmed",
                         name="set_rental_period",
                         arguments={
-                            "startAt": "2026-07-16T14:00:00+08:00",
-                            "endAt": "2026-07-17T14:00:00+08:00",
+                                "startAt": "2026-07-17T14:00:00+08:00",
+                                "endAt": "2026-07-18T14:00:00+08:00",
                         },
                     ),
                 ),
@@ -671,7 +671,26 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
         end_at=datetime(2026, 7, 22, tzinfo=UTC),
     )
     repository = FakeRepository("这台有货吗？")
-    repository.state = complete_scenario_state(period)
+    scenario_state = complete_scenario_state(period)
+    repository.state = ConversationStateMemory(
+        scenario_state.rental_start_at,
+        scenario_state.rental_end_at,
+        scenario_state.rental_requirements,
+        recent_product_search=RecentProductSearch(
+            items=(
+                RecentProductReference(
+                    position=1,
+                    product_id=product_id,
+                    name="Sony A7M4",
+                    brand="Sony",
+                    model="A7M4",
+                    equipment_role="camera",
+                    daily_rate="200.00",
+                    fixed_deposit="1000.00",
+                ),
+            )
+        ),
+    )
     model = SequenceModel(
         [
             ModelResponse(
@@ -737,6 +756,16 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
     ]
     assert repository.finalized is not None
     assert "可租 2 台" in repository.finalized["state"]["reply"]  # type: ignore[index]
+    presentations = [
+        payload
+        for event_type, payload in repository.events
+        if event_type == "recommendation.presented"
+    ]
+    assert presentations[0]["rentalPeriod"] == {
+        "startAt": "2026-07-20T00:00:00Z",
+        "endAt": "2026-07-22T00:00:00Z",
+    }
+    assert presentations[0]["sections"][0]["products"][0]["availableCount"] == 2  # type: ignore[index]
 
 
 async def test_selected_product_survives_period_confirmation_rounds() -> None:

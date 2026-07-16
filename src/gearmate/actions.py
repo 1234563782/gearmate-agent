@@ -43,6 +43,7 @@ class AgentAction(BaseModel):
     brand: str | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=64)
     semantic_query: str | None = Field(default=None, max_length=512)
+    use_case_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_position: int | None = Field(default=None, ge=1, le=100)
@@ -64,6 +65,7 @@ class PendingProductSearch(BaseModel):
     brand: str | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=64)
     semantic_query: str | None = Field(default=None, max_length=512)
+    use_case_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     waiting_for_rental_period: bool = False
@@ -82,6 +84,7 @@ class PendingProductSearch(BaseModel):
             brand=action.brand,
             model=action.model,
             semantic_query=action.semantic_query,
+            use_case_id=action.use_case_id,
             category_id=action.category_id,
             max_daily_rate=action.max_daily_rate,
             waiting_for_rental_period=waiting_for_rental_period,
@@ -98,6 +101,7 @@ class PendingProductSearch(BaseModel):
                 "brand": action.brand or self.brand,
                 "model": action.model or self.model,
                 "semantic_query": action.semantic_query or self.semantic_query,
+                "use_case_id": action.use_case_id or self.use_case_id,
                 "category_id": action.category_id or self.category_id,
                 "max_daily_rate": action.max_daily_rate or self.max_daily_rate,
             }
@@ -218,7 +222,8 @@ You must call {ACTION_RESOLVER_TOOL_NAME} exactly once. Do not answer the user.
 Choose one action based on meaning, in any user language:
 - chat: greetings, thanks, identity/help questions, or unrelated conversation.
 - product_search: browse, find, compare, or ask about products/categories. Extract a concise
-  catalog intent, canonical English equipmentRole, brand, model, semantic use-case query, and
+  catalog intent, canonical English equipmentRole, brand, model, semantic use-case query, dynamic
+  useCaseId from an authoritative use_case alias, and
   optional category ID or maximum daily rate. A generic category word already represented by
   equipmentRole must not be returned as keyword. Set keywordSpecificity=specific only for a real
   model fragment or subtype that must additionally narrow the role; otherwise omit keyword.
@@ -333,6 +338,16 @@ class AgentActionResolver:
                 action = action.model_copy(
                     update={"product_id": recent_product_ids[index]}
                 )
+            if (
+                action.action == "product_search"
+                and action.use_case_id is None
+                and catalog_vocabulary is not None
+            ):
+                matched_use_cases = catalog_vocabulary.matching_use_case_ids(message)
+                if len(matched_use_cases) == 1:
+                    action = action.model_copy(
+                        update={"use_case_id": matched_use_cases[0]}
+                    )
             if (
                 action.equipment_role is not None
                 and action.equipment_role not in self._equipment_roles
