@@ -22,6 +22,7 @@ from gearmate.persistence.models import (
     RunEvent,
 )
 from gearmate.requirements import RentalRequirements
+from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 
 
@@ -390,6 +391,28 @@ class AgentRepository:
             attributes.pop("pendingRentalAction", None)
             state.attributes = attributes
 
+    async def upsert_recent_product_search(
+        self,
+        conversation_id: str,
+        recent_search: RecentProductSearch,
+    ) -> None:
+        attributes = {
+            "recentProductSearch": recent_search.model_dump(mode="json", by_alias=True)
+        }
+        statement = pg_insert(ConversationState).values(
+            conversation_id=conversation_id,
+            attributes=attributes,
+        )
+        statement = statement.on_conflict_do_update(
+            index_elements=[ConversationState.conversation_id],
+            set_={
+                "attributes": ConversationState.attributes.op("||")(statement.excluded.attributes),
+                "updated_at": func.current_timestamp(),
+            },
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
     async def upsert_conversation_requirements(
         self,
         conversation_id: str,
@@ -427,6 +450,7 @@ class AgentRepository:
             raw_requirements = state.attributes.get("rentalRequirements")
             raw_pending_search = state.attributes.get("pendingProductSearch")
             raw_pending_rental_action = state.attributes.get("pendingRentalAction")
+            raw_recent_product_search = state.attributes.get("recentProductSearch")
             return ConversationStateMemory(
                 rental_start_at=state.rental_start_at,
                 rental_end_at=state.rental_end_at,
@@ -443,6 +467,11 @@ class AgentRepository:
                 pending_rental_action=(
                     PendingRentalAction.model_validate(raw_pending_rental_action)
                     if raw_pending_rental_action is not None
+                    else None
+                ),
+                recent_product_search=(
+                    RecentProductSearch.model_validate(raw_recent_product_search)
+                    if raw_recent_product_search is not None
                     else None
                 ),
             )

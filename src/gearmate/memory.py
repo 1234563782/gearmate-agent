@@ -10,6 +10,7 @@ from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelUsage
 from gearmate.rental_period import InvalidRentalPeriod, RentalPeriodPolicy
 from gearmate.requirements import RentalRequirements
+from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 
 SUMMARY_SYSTEM_PROMPT = """你负责压缩 GearMate 的较早会话历史。
@@ -36,6 +37,7 @@ class ConversationStateMemory:
     rental_requirements: RentalRequirements | None = None
     pending_product_search: PendingProductSearch | None = None
     pending_rental_action: PendingRentalAction | None = None
+    recent_product_search: RecentProductSearch | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +82,12 @@ class MemoryRepository(Protocol):
 
     async def clear_pending_rental_action(self, conversation_id: str) -> None: ...
 
+    async def upsert_recent_product_search(
+        self,
+        conversation_id: str,
+        recent_search: RecentProductSearch,
+    ) -> None: ...
+
     async def upsert_conversation_requirements(
         self, conversation_id: str, requirements: RentalRequirements
     ) -> None: ...
@@ -120,6 +128,7 @@ class ConversationContext:
     rental_requirements: RentalRequirements | None
     pending_product_search: PendingProductSearch | None
     pending_rental_action: PendingRentalAction | None
+    recent_product_search: RecentProductSearch | None
     timezone: str
     now_utc: datetime
     now_local: datetime
@@ -177,6 +186,13 @@ class ConversationMemoryService:
 
     async def clear_pending_rental_action(self, conversation_id: str) -> None:
         await self._repository.clear_pending_rental_action(conversation_id)
+
+    async def remember_recent_product_search(
+        self,
+        conversation_id: str,
+        recent_search: RecentProductSearch,
+    ) -> None:
+        await self._repository.upsert_recent_product_search(conversation_id, recent_search)
 
     async def build_context(
         self, conversation_id: str, now_utc: datetime | None = None
@@ -246,6 +262,7 @@ class ConversationMemoryService:
             rental_requirements=(state.rental_requirements if state is not None else None),
             pending_product_search=(state.pending_product_search if state is not None else None),
             pending_rental_action=(state.pending_rental_action if state is not None else None),
+            recent_product_search=(state.recent_product_search if state is not None else None),
             timezone=timezone,
             now_utc=reference_utc,
             now_local=reference_local,

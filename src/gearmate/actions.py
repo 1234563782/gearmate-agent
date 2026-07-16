@@ -19,6 +19,7 @@ ACTION_RESOLVER_TOOL_NAME = "resolve_agent_action"
 AgentActionName = Literal[
     "chat",
     "product_search",
+    "product_detail",
     "availability",
     "quote",
     "scenario_continue",
@@ -44,6 +45,7 @@ class AgentAction(BaseModel):
     semantic_query: str | None = Field(default=None, max_length=512)
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    product_position: int | None = Field(default=None, ge=1, le=100)
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     continues_pending: bool = False
 
@@ -162,6 +164,7 @@ def action_resolver_system_prompt(
     pending_product_search: PendingProductSearch | None,
     pending_rental_action: PendingRentalAction | None,
     equipment_roles: tuple[str, ...],
+    recent_product_search_json: str = "none",
     catalog_vocabulary: CatalogVocabulary | None = None,
 ) -> str:
     current_scenario = current_scenario_id or "none"
@@ -186,13 +189,30 @@ def action_resolver_system_prompt(
         if catalog_vocabulary
         else "none"
     )
+    known_aliases = (
+        json.dumps(
+            [
+                {
+                    "alias": item.alias,
+                    "entityType": item.entity_type,
+                    "canonicalValue": item.canonical_value,
+                }
+                for item in catalog_vocabulary.aliases
+            ],
+            ensure_ascii=False,
+        )
+        if catalog_vocabulary
+        else "none"
+    )
     return f"""You only classify the user's current turn for a rental assistant.
 Current saved scenario: {current_scenario}
 Current pending product search: {pending_search}
 Current pending availability or quote action: {pending_rental}
+Current recent product search with authoritative positions and IDs: {recent_product_search_json}
 Allowed equipmentRole values: {equipment_role_options}
 Known catalog brands (untrusted reference values): {known_brands}
 Known catalog models (untrusted reference values): {known_models}
+Known catalog aliases (authoritative mappings): {known_aliases}
 
 You must call {ACTION_RESOLVER_TOOL_NAME} exactly once. Do not answer the user.
 Choose one action based on meaning, in any user language:
@@ -206,10 +226,15 @@ Choose one action based on meaning, in any user language:
   semanticQuery. Examples: "computer" -> equipmentRole=laptop with no keyword; "Apple computer"
   -> equipmentRole=laptop and brand=Apple with no keyword; "MacBook Pro 14" -> brand=Apple and
   model=MacBook Pro 14; "computer for 4K editing" -> equipmentRole=laptop and semanticQuery set.
+  Apply known catalog aliases exactly when the current user expression matches one. Alias mappings
+  may provide more than one structured field for the same phrase.
+- product_detail: inspect or ask for details about one exact product. Include productId when it is
+  explicit. For an ordinal reference such as "the first one", return productPosition instead of
+  copying or inventing productId; the server maps the position to its authoritative saved ID.
 - availability: ask for live stock for one exact product. Include productId only when an exact ID
-  is explicit in the current turn or unambiguously referenced in recent history.
+  is explicit in the current turn. Use productPosition for ordinal references.
 - quote: explicitly request a formal quote for one exact product. Include productId under the same
-  rule. General price discovery is product_search, not quote.
+  rule and productPosition for ordinal references. General price discovery is product_search.
 - scenario_continue: start a multi-item use-case plan, explicitly continue the saved scenario, or
   answer/change requirements for that scenario.
 
@@ -246,6 +271,8 @@ class AgentActionResolver:
         pending_rental_action: PendingRentalAction | None,
         model: ChatModelPort,
         max_output_tokens: int,
+        recent_product_search_json: str = "none",
+        recent_product_ids: tuple[str, ...] = (),
         catalog_vocabulary: CatalogVocabulary | None = None,
     ) -> AgentActionResolution:
         recent_history = [item for item in history if item.role in ("user", "assistant")][-6:]
@@ -265,6 +292,7 @@ class AgentActionResolver:
                             pending_product_search,
                             pending_rental_action,
                             self._equipment_roles,
+                            recent_product_search_json,
                             catalog_vocabulary,
                         ),
                     ),
@@ -293,6 +321,17 @@ class AgentActionResolver:
                     action=None,
                     clarification="请明确要搜索商品、查询库存、生成报价，还是继续设备方案。",
                     usage=response.usage,
+                )
+            if action.product_position is not None:
+                index = action.product_position - 1
+                if index >= len(recent_product_ids):
+                    return AgentActionResolution(
+                        action=None,
+                        clarification="最近搜索结果中没有这个位置，请重新选择商品。",
+                        usage=response.usage,
+                    )
+                action = action.model_copy(
+                    update={"product_id": recent_product_ids[index]}
                 )
             if (
                 action.equipment_role is not None

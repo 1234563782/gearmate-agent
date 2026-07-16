@@ -33,6 +33,7 @@ from gearmate.requirements import (
     ScenarioCatalog,
     ScenarioPlan,
 )
+from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
 
@@ -151,6 +152,18 @@ class RunCoordinator:
                 pending_rental_action=context.pending_rental_action,
                 model=model,
                 max_output_tokens=(self._settings.action_resolution_max_output_tokens),
+                recent_product_search_json=(
+                    context.recent_product_search.model_dump_json(by_alias=True)
+                    if context.recent_product_search is not None
+                    else "none"
+                ),
+                recent_product_ids=(
+                    tuple(
+                        item.product_id for item in context.recent_product_search.items
+                    )
+                    if context.recent_product_search is not None
+                    else ()
+                ),
                 catalog_vocabulary=(
                     await self._catalog_search.vocabulary()
                     if self._catalog_search is not None
@@ -309,7 +322,7 @@ class RunCoordinator:
                     )
                     await self._complete_clarification(
                         run_id=run_id,
-                        text=requirements_resolution.clarification or "请补充完整的直播设备需求。",
+                        text=requirements_resolution.clarification or "请补充完整的设备租赁需求。",
                         usage=clarification_usage,
                         duration_ms=round((monotonic() - started) * 1000),
                         model_rounds=(resolver_rounds + action_rounds + requirements_rounds),
@@ -332,6 +345,13 @@ class RunCoordinator:
                     scenario_plan=scenario_plan,
                     action=action,
                     write_event=write_event,
+                )
+            if tools.last_search_diagnostics is not None:
+                await write_event("search.retrieval", tools.last_search_diagnostics)
+            if action.action == "product_search" and tools.last_product_search_result is not None:
+                await self._memory.remember_recent_product_search(
+                    conversation_id,
+                    RecentProductSearch.from_result(tools.last_product_search_result),
                 )
             if action.action == "product_search" and result.tool_call_count > 0:
                 await self._memory.clear_pending_product_search(conversation_id)

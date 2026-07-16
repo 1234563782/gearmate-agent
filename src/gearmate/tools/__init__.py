@@ -1,4 +1,4 @@
-"""Read-only RentFlow tool contracts."""
+"""RentFlow selection, availability, and quote tool contracts."""
 
 from gearmate.tools.contracts import AvailabilityTool, CatalogSearchTool, QuoteTool, ToolPorts
 

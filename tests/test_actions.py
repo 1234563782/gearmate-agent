@@ -6,6 +6,7 @@ from gearmate.actions import (
     merge_pending_product_search,
     merge_pending_rental_action,
 )
+from gearmate.catalog import CatalogAliasTerm, CatalogVocabulary
 from gearmate.llm.types import (
     ModelRequest,
     ModelResponse,
@@ -87,6 +88,83 @@ async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:
     assert result.action is not None
     assert result.action.action == "chat"
     assert "must not turn thanks" in model.requests[0].messages[0].content
+
+
+async def test_resolver_receives_database_catalog_aliases() -> None:
+    model = FakeModel(
+        {
+            "action": "product_search",
+            "equipmentRole": "laptop",
+            "brand": "Apple",
+        }
+    )
+
+    await AgentActionResolver(("laptop",)).resolve(
+        message="苹果电脑",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+        catalog_vocabulary=CatalogVocabulary(
+            aliases=(
+                CatalogAliasTerm("苹果电脑", "equipment_role", "laptop"),
+                CatalogAliasTerm("苹果电脑", "brand", "Apple"),
+            )
+        ),
+    )
+
+    prompt = model.requests[0].messages[0].content
+    assert '"alias": "苹果电脑"' in prompt
+    assert '"canonicalValue": "Apple"' in prompt
+
+
+async def test_resolver_maps_recent_product_position_to_authoritative_id() -> None:
+    model = FakeModel(
+        {
+            "action": "product_detail",
+            "productPosition": 1,
+        }
+    )
+
+    result = await AgentActionResolver(("laptop",)).resolve(
+        message="看看第一个",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+        recent_product_search_json='{"items": [{"position": 1}]}',
+        recent_product_ids=("01J00000000000000000000105",),
+    )
+
+    assert result.action is not None
+    assert result.action.product_id == "01J00000000000000000000105"
+
+
+async def test_resolver_rejects_missing_recent_product_position() -> None:
+    model = FakeModel(
+        {
+            "action": "availability",
+            "productPosition": 2,
+        }
+    )
+
+    result = await AgentActionResolver(("laptop",)).resolve(
+        message="第二个有货吗",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+        recent_product_ids=("01J00000000000000000000105",),
+    )
+
+    assert result.action is None
+    assert result.clarification == "最近搜索结果中没有这个位置，请重新选择商品。"
 
 
 def test_pending_search_merges_only_missing_followup_fields() -> None:

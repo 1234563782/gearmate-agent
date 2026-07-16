@@ -16,6 +16,7 @@ from gearmate.rentflow.client import RentFlowClient, RentFlowError
 from gearmate.requirements import EquipmentNeed, EquipmentRole, ScenarioPlan
 from gearmate.tools.contracts import (
     AvailabilityInput,
+    ProductDetailInput,
     ProductSearchInput,
     ProductSearchResult,
     ProductSummary,
@@ -55,6 +56,8 @@ class ToolRegistry:
         self._max_concurrency = max_concurrency
         self._scenario_plan = scenario_plan
         self._catalog_search = catalog_search
+        self._last_search_diagnostics: dict[str, Any] | None = None
+        self._last_product_search_result: ProductSearchResult | None = None
         self._cache: dict[str, ToolExecutionResult] = {}
         self._tools = {
             "search_products": ToolDescriptor(
@@ -66,6 +69,15 @@ class ToolRegistry:
                 concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
                 max_result_items=max_result_items,
+            ),
+            "get_product": ToolDescriptor(
+                name="get_product",
+                description="按精确商品 ID 获取 RentFlow 商品详情。",
+                input_model=ProductDetailInput,
+                handler=self._get_product,
+                read_only=True,
+                concurrency_safe=True,
+                timeout_seconds=timeout_seconds,
             ),
             "check_availability": ToolDescriptor(
                 name="check_availability",
@@ -100,6 +112,16 @@ class ToolRegistry:
                 concurrency_safe=False,
                 timeout_seconds=timeout_seconds,
             )
+
+    @property
+    def last_search_diagnostics(self) -> dict[str, Any] | None:
+        if self._last_search_diagnostics is None:
+            return None
+        return dict(self._last_search_diagnostics)
+
+    @property
+    def last_product_search_result(self) -> ProductSearchResult | None:
+        return self._last_product_search_result
 
     def model_definitions(self) -> tuple[ModelToolDefinition, ...]:
         return tuple(
@@ -263,39 +285,57 @@ class ToolRegistry:
         self,
         request: ProductSearchInput,
     ) -> ProductSearchResult:
+        semantic_attempted = bool(request.semantic_query and self._catalog_search is not None)
         if request.semantic_query and self._catalog_search is not None:
             try:
                 semantic_result = await self._semantic_products(request)
                 if semantic_result.items:
+                    self._last_product_search_result = semantic_result
                     return semantic_result
+                self._last_search_diagnostics = {
+                    "mode": "structured_fallback",
+                    "reason": "NO_SEMANTIC_CANDIDATE_ABOVE_THRESHOLD",
+                    "semanticQuery": request.semantic_query,
+                }
             except Exception:
                 logger.exception("Semantic product search failed; using structured fallback")
+                self._last_search_diagnostics = {
+                    "mode": "structured_fallback",
+                    "reason": "SEMANTIC_SEARCH_FAILED",
+                    "semanticQuery": request.semantic_query,
+                }
         result = await self._rentflow.search_products(request)
-        if (
-            request.equipment_role is None
-            and request.brand is None
-            and request.model is None
-        ):
+        diagnostics = self._last_search_diagnostics or {}
+        self._last_search_diagnostics = {
+            **diagnostics,
+            "mode": "structured_fallback" if semantic_attempted else "structured",
+            "resultCount": len(result.items),
+        }
+        if request.equipment_role is None and request.brand is None and request.model is None:
+            self._last_product_search_result = result
             return result
         matching_items = tuple(
             item
             for item in result.items
-            if (
-                request.equipment_role is None
-                or item.equipment_role == request.equipment_role
-            )
+            if (request.equipment_role is None or item.equipment_role == request.equipment_role)
             and (request.brand is None or item.brand.casefold() == request.brand.casefold())
             and (request.model is None or item.model.casefold() == request.model.casefold())
         )
         if len(matching_items) == len(result.items):
+            self._last_product_search_result = result
             return result
-        return result.model_copy(
+        filtered_result = result.model_copy(
             update={
                 "items": matching_items,
                 "total_elements": len(matching_items),
                 "total_pages": 1 if matching_items else 0,
             }
         )
+        self._last_product_search_result = filtered_result
+        return filtered_result
+
+    async def _get_product(self, request: ProductDetailInput) -> BaseModel:
+        return await self._rentflow.get_product(request.product_id)
 
     async def _semantic_products(self, request: ProductSearchInput) -> ProductSearchResult:
         catalog_search = self._catalog_search
@@ -307,6 +347,20 @@ class ToolRegistry:
             brand=request.brand,
             model=request.model,
         )
+        self._last_search_diagnostics = {
+            "mode": "semantic",
+            "semanticQuery": request.semantic_query,
+            "candidateCount": len(candidates),
+            "candidates": [
+                {
+                    "productId": candidate.product_id,
+                    "score": round(candidate.score, 6),
+                    "vectorScore": round(candidate.vector_score, 6),
+                    "lexicalScore": round(candidate.lexical_score, 6),
+                }
+                for candidate in candidates
+            ],
+        }
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def hydrate(product_id: str) -> ProductSummary:

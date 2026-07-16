@@ -68,6 +68,10 @@ class ProductDetail(ToolModel):
     fixed_deposit: str
 
 
+class ProductDetailInput(ToolModel):
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
 class ProductSearchResult(ToolModel):
     items: tuple[ProductSummary, ...]
     page: int = Field(ge=0)

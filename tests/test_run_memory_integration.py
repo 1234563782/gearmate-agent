@@ -17,6 +17,7 @@ from gearmate.llm.types import (
 from gearmate.memory import ConversationMessageMemory, ConversationStateMemory
 from gearmate.prompts.loader import RenderedPrompt
 from gearmate.requirements import RentalRequirements
+from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 
 
@@ -27,6 +28,7 @@ class FakeRepository:
         self.remembered_requirements: RentalRequirements | None = None
         self.remembered_pending_search: PendingProductSearch | None = None
         self.remembered_pending_rental_action: PendingRentalAction | None = None
+        self.remembered_recent_search: RecentProductSearch | None = None
         self.events: list[tuple[str, dict[str, object]]] = []
         self.finalized: dict[str, object] | None = None
         self.state: ConversationStateMemory | None = None
@@ -79,6 +81,7 @@ class FakeRepository:
             state.rental_requirements,
             state.pending_product_search,
             state.pending_rental_action,
+            state.recent_product_search,
         )
 
     async def clear_conversation_rental_period(self, conversation_id: str) -> None:
@@ -90,6 +93,7 @@ class FakeRepository:
                 self.state.rental_requirements,
                 self.state.pending_product_search,
                 self.state.pending_rental_action,
+                self.state.recent_product_search,
             )
 
     async def upsert_pending_product_search(
@@ -105,6 +109,7 @@ class FakeRepository:
             state.rental_requirements,
             pending_search,
             state.pending_rental_action,
+            state.recent_product_search,
         )
 
     async def clear_pending_product_search(self, conversation_id: str) -> None:
@@ -116,6 +121,7 @@ class FakeRepository:
                 self.state.rental_requirements,
                 None,
                 self.state.pending_rental_action,
+                self.state.recent_product_search,
             )
 
     async def upsert_pending_rental_action(
@@ -131,6 +137,7 @@ class FakeRepository:
             state.rental_requirements,
             state.pending_product_search,
             pending_action,
+            state.recent_product_search,
         )
 
     async def clear_pending_rental_action(self, conversation_id: str) -> None:
@@ -142,7 +149,24 @@ class FakeRepository:
                 self.state.rental_requirements,
                 self.state.pending_product_search,
                 None,
+                self.state.recent_product_search,
             )
+
+    async def upsert_recent_product_search(
+        self,
+        conversation_id: str,
+        recent_search: RecentProductSearch,
+    ) -> None:
+        self.remembered_recent_search = recent_search
+        state = self.state or ConversationStateMemory(None, None)
+        self.state = ConversationStateMemory(
+            state.rental_start_at,
+            state.rental_end_at,
+            state.rental_requirements,
+            state.pending_product_search,
+            state.pending_rental_action,
+            recent_search,
+        )
 
     async def upsert_conversation_requirements(
         self,
@@ -628,6 +652,16 @@ async def test_new_product_search_does_not_replay_saved_scenario() -> None:
     assert not any(event == "requirements.resolved" for event, _ in repository.events)
     tool_events = [payload for event, payload in repository.events if event == "tool.started"]
     assert [payload["tool"] for payload in tool_events] == ["search_products"]
+    assert repository.remembered_recent_search is not None
+    assert repository.remembered_recent_search.items[0].position == 1
+    assert (
+        repository.remembered_recent_search.items[0].product_id
+        == "01J00000000000000000000101"
+    )
+    retrieval_events = [
+        payload for event, payload in repository.events if event == "search.retrieval"
+    ]
+    assert retrieval_events == [{"mode": "structured", "resultCount": 1}]
 
 
 async def test_saved_valid_period_is_reused_for_availability() -> None:

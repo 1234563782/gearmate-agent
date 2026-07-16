@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     rentflow_read_timeout_seconds: float = 20.0
     tool_timeout_seconds: float = 30.0
     catalog_equipment_roles: str = (
-        "action_camera,camera,capture_card,drone,laptop,lens,lighting,microphone,tripod"
+        "action_camera,camera,capture_card,drone,laptop,lens,lighting,microphone,projector,tripod"
     )
     jwt_public_key_path: Path | None = None
     jwt_issuer: str = "rentflow-server"
@@ -45,7 +45,12 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1024
     embedding_batch_size: int = 32
     semantic_search_top_k: int = 20
+    semantic_search_min_score: float = 0.65
+    semantic_vector_weight: float = 0.85
+    semantic_lexical_weight: float = 0.15
     catalog_sync_on_startup: bool = False
+    catalog_sync_interval_seconds: float = 900.0
+    catalog_sync_retry_seconds: float = 30.0
     run_timeout_seconds: float = 180.0
     max_model_rounds: int = 6
     max_tool_calls: int = 10
@@ -89,11 +94,24 @@ class Settings(BaseSettings):
         "tool_timeout_seconds",
         "event_poll_interval_seconds",
         "sse_heartbeat_seconds",
+        "catalog_sync_interval_seconds",
+        "catalog_sync_retry_seconds",
     )
     @classmethod
     def positive_timeout(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("timeout values must be positive")
+        return value
+
+    @field_validator(
+        "semantic_search_min_score",
+        "semantic_vector_weight",
+        "semantic_lexical_weight",
+    )
+    @classmethod
+    def unit_interval(cls, value: float) -> float:
+        if not 0 <= value <= 1:
+            raise ValueError("semantic search scores and weights must be between 0 and 1")
         return value
 
     @field_validator("model_max_output_tokens")
@@ -133,6 +151,13 @@ class Settings(BaseSettings):
         if value != 1024:
             raise ValueError("embedding_dimensions must match the vector(1024) database column")
         return value
+
+    @model_validator(mode="after")
+    def semantic_weights_sum_to_one(self) -> "Settings":
+        total = self.semantic_vector_weight + self.semantic_lexical_weight
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError("semantic vector and lexical weights must sum to 1")
+        return self
 
     @property
     def allowed_origins(self) -> tuple[str, ...]:

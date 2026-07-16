@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gearmate-agent"
 version = "0.1.0"
-description = "GearMate read-only rental assistant service"
+description = "GearMate electronic equipment rental selection and quote assistant service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.14,<2",

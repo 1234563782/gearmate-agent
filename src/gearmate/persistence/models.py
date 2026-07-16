@@ -207,3 +207,29 @@ class ProductSearchDocument(Base):
         nullable=False,
         server_default=func.current_timestamp(),
     )
+
+
+class CatalogAlias(Base):
+    __tablename__ = "catalog_aliases"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('equipment_role', 'brand', 'model')",
+            name="ck_catalog_aliases_entity_type",
+        ),
+        Index("idx_catalog_aliases_active", "active"),
+    )
+
+    alias: Mapped[str] = mapped_column(String(128), primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    canonical_value: Mapped[str] = mapped_column(String(128), nullable=False)
+    locale: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'und'"))
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'manual'")
+    )
+    active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )

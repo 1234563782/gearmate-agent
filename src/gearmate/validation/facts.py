@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from gearmate.tools.contracts import (
     AvailabilityResult,
+    ProductDetail,
     ProductSearchResult,
     ProductSummary,
     QuoteResult,
@@ -47,6 +48,18 @@ class FactSnapshot:
         if isinstance(result, ProductSearchResult):
             self.product_search_performed = True
             self.products.update((item.product_id, item) for item in result.items)
+        elif isinstance(result, ProductDetail):
+            self.products[result.product_id] = ProductSummary(
+                product_id=result.product_id,
+                category_id=result.category_id,
+                equipment_role=result.equipment_role,
+                name=result.name,
+                brand=result.brand,
+                model=result.model,
+                daily_rate=result.daily_rate,
+                fixed_deposit=result.fixed_deposit,
+                available_count=None,
+            )
         elif isinstance(result, AvailabilityResult):
             self.availability[result.product_id] = result
         elif isinstance(result, QuoteResult):

@@ -157,6 +157,33 @@ async def test_availability_without_product_id_clarifies_without_tools() -> None
     assert model.requests == []
 
 
+async def test_product_detail_is_routed_by_remembered_product_id() -> None:
+    model = FakeModel()
+    tools = FakeTools()
+
+    await GearMateAgent(
+        model,
+        tools,  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        RenderedPrompt(version="test", content_hash="hash", content="system"),
+    ).run(
+        message="看看第一个",
+        history=[],
+        rental_period=None,
+        scenario_plan=None,
+        action=AgentAction(
+            action="product_detail",
+            product_id="01J00000000000000000000101",
+        ),
+        write_event=_ignore_event,
+    )
+
+    assert model.requests == []
+    assert len(tools.calls) == 1
+    assert tools.calls[0].name == "get_product"
+    assert tools.calls[0].arguments["productId"] == "01J00000000000000000000101"
+
+
 class EmptySearchTools(FakeTools):
     async def execute_all(self, calls, facts, write_event):
         self.calls.extend(calls)

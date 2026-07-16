@@ -11,6 +11,7 @@ from gearmate.memory import (
     ConversationSummaryMemory,
 )
 from gearmate.rental_period import InvalidRentalPeriod
+from gearmate.search import RecentProductReference, RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 
 
@@ -26,6 +27,7 @@ class FakeRepository:
         self.pending_cleared = False
         self.pending_rental_action: PendingRentalAction | None = None
         self.pending_rental_cleared = False
+        self.recent_search: RecentProductSearch | None = None
         self.saved_summary: dict[str, object] | None = None
         self.recent_after_event_id: str | None = None
 
@@ -61,6 +63,13 @@ class FakeRepository:
     async def clear_pending_rental_action(self, conversation_id: str) -> None:
         self.pending_rental_cleared = True
         self.pending_rental_action = None
+
+    async def upsert_recent_product_search(
+        self,
+        conversation_id: str,
+        recent_search: RecentProductSearch,
+    ) -> None:
+        self.recent_search = recent_search
 
     async def conversation_state(self, conversation_id: str) -> ConversationStateMemory | None:
         return self.state
@@ -248,6 +257,37 @@ async def test_build_context_restores_pending_product_search() -> None:
     )
 
     assert context.pending_product_search == pending
+
+
+async def test_recent_product_search_is_remembered_and_restored() -> None:
+    repository = FakeRepository()
+    recent = RecentProductSearch(
+        items=(
+            RecentProductReference(
+                position=1,
+                product_id="01J00000000000000000000105",
+                name="MacBook Pro 14",
+                brand="Apple",
+                model="MacBook Pro 14",
+                equipment_role="laptop",
+            ),
+        )
+    )
+    service = ConversationMemoryService(repository, settings())
+
+    await service.remember_recent_product_search("conversation-1", recent)
+    repository.state = ConversationStateMemory(
+        None,
+        None,
+        recent_product_search=recent,
+    )
+    context = await service.build_context(
+        "conversation-1",
+        now_utc=datetime(2026, 7, 15, 6, tzinfo=UTC),
+    )
+
+    assert repository.recent_search == recent
+    assert context.recent_product_search == recent
 
 
 async def test_pending_rental_action_is_remembered_and_cleared() -> None:

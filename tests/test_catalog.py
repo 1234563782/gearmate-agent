@@ -23,10 +23,11 @@ class FakeEmbeddings:
 
 
 class FakeCatalogRepository:
-    def __init__(self) -> None:
+    def __init__(self, vector_score: float = 0.91) -> None:
         self.hashes: dict[str, str] = {}
         self.upserts = []
         self.search_arguments: dict[str, object] | None = None
+        self.vector_score = vector_score
 
     async def content_hashes(self) -> dict[str, str]:
         return dict(self.hashes)
@@ -49,6 +50,7 @@ class FakeCatalogRepository:
         self,
         embedding,
         *,
+        query,
         equipment_role,
         brand,
         model,
@@ -56,12 +58,20 @@ class FakeCatalogRepository:
     ) -> tuple[SemanticProductCandidate, ...]:
         self.search_arguments = {
             "embedding": embedding,
+            "query": query,
             "equipment_role": equipment_role,
             "brand": brand,
             "model": model,
             "limit": limit,
         }
-        return (SemanticProductCandidate("01J00000000000000000000105", 0.91),)
+        return (
+            SemanticProductCandidate(
+                product_id="01J00000000000000000000105",
+                score=0.0,
+                vector_score=self.vector_score,
+                lexical_score=0.2,
+            ),
+        )
 
 
 class FakeRentFlowCatalog:
@@ -108,6 +118,9 @@ async def test_catalog_refresh_embeds_only_changed_products() -> None:
         batch_size=32,
         top_k=20,
         max_concurrency=4,
+        min_score=0.65,
+        vector_weight=0.85,
+        lexical_weight=0.15,
     )
     rentflow = FakeRentFlowCatalog()
 
@@ -130,6 +143,9 @@ async def test_semantic_search_keeps_structured_filters() -> None:
         batch_size=32,
         top_k=12,
         max_concurrency=4,
+        min_score=0.65,
+        vector_weight=0.85,
+        lexical_weight=0.15,
     )
 
     candidates = await service.search(
@@ -142,8 +158,34 @@ async def test_semantic_search_keeps_structured_filters() -> None:
     assert candidates[0].product_id == "01J00000000000000000000105"
     assert repository.search_arguments == {
         "embedding": (1.0, 0.0),
+        "query": "适合剪辑视频的电脑",
         "equipment_role": "laptop",
         "brand": "Apple",
         "model": None,
-        "limit": 12,
+        "limit": 36,
     }
+    assert candidates[0].vector_score == 0.91
+    assert candidates[0].score == 0.8035
+
+
+async def test_semantic_search_drops_candidates_below_minimum_score() -> None:
+    repository = FakeCatalogRepository(vector_score=0.64)
+    service = CatalogSearchService(
+        repository,  # type: ignore[arg-type]
+        FakeEmbeddings(),
+        batch_size=32,
+        top_k=12,
+        max_concurrency=4,
+        min_score=0.65,
+        vector_weight=0.85,
+        lexical_weight=0.15,
+    )
+
+    candidates = await service.search(
+        "完全不相关的用途",
+        equipment_role="laptop",
+        brand=None,
+        model=None,
+    )
+
+    assert candidates == ()

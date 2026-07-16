@@ -8,7 +8,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from gearmate.embeddings import EmbeddingPort
-from gearmate.persistence.models import ProductSearchDocument
+from gearmate.persistence.models import CatalogAlias, ProductSearchDocument
 from gearmate.rentflow.client import RentFlowClient
 from gearmate.tools.contracts import ProductDetail, ProductSearchInput, ProductSummary
 
@@ -30,6 +30,8 @@ class CatalogDocument:
 class SemanticProductCandidate:
     product_id: str
     score: float
+    vector_score: float
+    lexical_score: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,14 @@ class CatalogVocabulary:
     equipment_roles: tuple[str, ...] = ()
     brands: tuple[str, ...] = ()
     models: tuple[str, ...] = ()
+    aliases: tuple["CatalogAliasTerm", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogAliasTerm:
+    alias: str
+    entity_type: str
+    canonical_value: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,16 +143,35 @@ class CatalogSearchRepository:
                 .order_by(ProductSearchDocument.model)
                 .limit(limit)
             )
+            alias_rows = await session.execute(
+                select(
+                    CatalogAlias.alias,
+                    CatalogAlias.entity_type,
+                    CatalogAlias.canonical_value,
+                )
+                .where(CatalogAlias.active.is_(True))
+                .order_by(CatalogAlias.alias, CatalogAlias.entity_type)
+                .limit(limit)
+            )
             return CatalogVocabulary(
                 equipment_roles=tuple(role_rows),
                 brands=tuple(brand_rows),
                 models=tuple(model_rows),
+                aliases=tuple(
+                    CatalogAliasTerm(
+                        alias=str(alias),
+                        entity_type=str(entity_type),
+                        canonical_value=str(canonical_value),
+                    )
+                    for alias, entity_type, canonical_value in alias_rows
+                ),
             )
 
     async def semantic_search(
         self,
         embedding: tuple[float, ...],
         *,
+        query: str,
         equipment_role: str | None,
         brand: str | None,
         model: str | None,
@@ -152,6 +181,8 @@ class CatalogSearchRepository:
         parameters: dict[str, object] = {
             "embedding": json.dumps(embedding, separators=(",", ":")),
             "limit": limit,
+            "query": query,
+            "pattern": f"%{query.casefold()}%",
         }
         if equipment_role is not None:
             filters.append("equipment_role = :equipment_role")
@@ -163,7 +194,14 @@ class CatalogSearchRepository:
             filters.append("LOWER(model) = LOWER(:model)")
             parameters["model"] = model
         statement = text(
-            "SELECT product_id, 1 - (embedding <=> CAST(:embedding AS vector)) AS score "
+            "SELECT product_id, "
+            "1 - (embedding <=> CAST(:embedding AS vector)) AS vector_score, "
+            "CASE "
+            "WHEN LOWER(model) = LOWER(:query) THEN 1.0 "
+            "WHEN LOWER(name) = LOWER(:query) THEN 0.9 "
+            "WHEN LOWER(model) LIKE :pattern OR LOWER(name) LIKE :pattern THEN 0.7 "
+            "WHEN LOWER(brand) = LOWER(:query) THEN 0.5 "
+            "ELSE 0.0 END AS lexical_score "
             "FROM product_search_documents WHERE "
             + " AND ".join(filters)
             + " ORDER BY embedding <=> CAST(:embedding AS vector), product_id LIMIT :limit"
@@ -171,7 +209,12 @@ class CatalogSearchRepository:
         async with self._sessions() as session:
             rows = await session.execute(statement, parameters)
             return tuple(
-                SemanticProductCandidate(product_id=str(row.product_id), score=float(row.score))
+                SemanticProductCandidate(
+                    product_id=str(row.product_id),
+                    score=0.0,
+                    vector_score=float(row.vector_score),
+                    lexical_score=float(row.lexical_score),
+                )
                 for row in rows
             )
 
@@ -185,12 +228,18 @@ class CatalogSearchService:
         batch_size: int,
         top_k: int,
         max_concurrency: int,
+        min_score: float,
+        vector_weight: float,
+        lexical_weight: float,
     ) -> None:
         self._repository = repository
         self._embeddings = embeddings
         self._batch_size = batch_size
         self._top_k = top_k
         self._max_concurrency = max_concurrency
+        self._min_score = min_score
+        self._vector_weight = vector_weight
+        self._lexical_weight = lexical_weight
 
     async def refresh(self, rentflow: RentFlowClient) -> CatalogIndexStats:
         summaries: list[ProductSummary] = []
@@ -246,13 +295,29 @@ class CatalogSearchService:
         model: str | None,
     ) -> tuple[SemanticProductCandidate, ...]:
         embeddings = await self._embeddings.embed((query,))
-        return await self._repository.semantic_search(
+        candidates = await self._repository.semantic_search(
             embeddings[0],
+            query=query,
             equipment_role=equipment_role,
             brand=brand,
             model=model,
-            limit=self._top_k,
+            limit=min(100, self._top_k * 3),
         )
+        ranked = [
+            SemanticProductCandidate(
+                product_id=item.product_id,
+                vector_score=item.vector_score,
+                lexical_score=item.lexical_score,
+                score=(
+                    self._vector_weight * item.vector_score
+                    + self._lexical_weight * item.lexical_score
+                ),
+            )
+            for item in candidates
+            if item.vector_score >= self._min_score
+        ]
+        ranked.sort(key=lambda item: (-item.score, item.product_id))
+        return tuple(ranked[: self._top_k])
 
     def _document(self, product: ProductDetail) -> CatalogDocument:
         search_text = "\n".join(

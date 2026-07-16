@@ -1,7 +1,54 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
+
 from gearmate.actions import AgentAction
+from gearmate.tools.contracts import ProductSearchResult
+
+
+class RecentProductReference(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    position: int = Field(ge=1, le=100)
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    name: str
+    brand: str
+    model: str
+    equipment_role: str
+
+
+class RecentProductSearch(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
+    items: tuple[RecentProductReference, ...] = ()
+
+    @classmethod
+    def from_result(cls, result: ProductSearchResult) -> "RecentProductSearch":
+        return cls(
+            items=tuple(
+                RecentProductReference(
+                    position=index,
+                    product_id=item.product_id,
+                    name=item.name,
+                    brand=item.brand,
+                    model=item.model,
+                    equipment_role=item.equipment_role,
+                )
+                for index, item in enumerate(result.items, start=1)
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)

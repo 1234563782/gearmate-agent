@@ -1,6 +1,7 @@
 from decimal import Decimal
 from pathlib import Path
 
+from gearmate.config import Settings
 from gearmate.llm.types import (
     ModelRequest,
     ModelResponse,
@@ -123,6 +124,25 @@ def test_catalog_detection_does_not_treat_plain_product_as_scenario() -> None:
     assert catalog.detect_scenario("我需要直播设备") is not None
     assert catalog.detect_scenario("帮我找一个麦克风") is None
     assert catalog.has_followup_signal("live_streaming", "预算改成每天 600 元")
+
+
+def test_default_roles_cover_configured_business_meeting_equipment() -> None:
+    catalog = ScenarioCatalog.load_default()
+    plan = catalog.build_plan(
+        RentalRequirements(
+            scenario_id="business_meeting",
+            answers={
+                "attendee_count": 20,
+                "needs_projection": True,
+                "needs_audio": True,
+            },
+        )
+    )
+
+    configured_roles = set(Settings(_env_file=None).equipment_roles)
+
+    assert plan.ready
+    assert {item.role for item in plan.equipment_needs} <= configured_roles
 
 
 def test_new_scenario_is_added_by_configuration_only(tmp_path: Path) -> None:

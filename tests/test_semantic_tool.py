@@ -17,7 +17,14 @@ class FakeSemanticCatalog:
         assert equipment_role == "laptop"
         assert brand == "Apple"
         assert model is None
-        return (SemanticProductCandidate("01J00000000000000000000105", 0.93),)
+        return (
+            SemanticProductCandidate(
+                product_id="01J00000000000000000000105",
+                score=0.93,
+                vector_score=0.91,
+                lexical_score=0.2,
+            ),
+        )
 
 
 class FailingSemanticCatalog:
@@ -100,6 +107,19 @@ async def test_semantic_candidates_are_hydrated_from_rentflow() -> None:
     assert results[0].result is not None
     assert results[0].result.items[0].name == "MacBook Pro 14"  # type: ignore[attr-defined]
     assert rentflow.structured_calls == 0
+    assert registry.last_search_diagnostics == {
+        "mode": "semantic",
+        "semanticQuery": "适合剪视频的电脑",
+        "candidateCount": 1,
+        "candidates": [
+            {
+                "productId": "01J00000000000000000000105",
+                "score": 0.93,
+                "vectorScore": 0.91,
+                "lexicalScore": 0.2,
+            }
+        ],
+    }
 
 
 async def test_semantic_failure_falls_back_to_structured_search() -> None:
@@ -129,6 +149,12 @@ async def test_semantic_failure_falls_back_to_structured_search() -> None:
 
     assert not results[0].is_error
     assert rentflow.structured_calls == 1
+    assert registry.last_search_diagnostics == {
+        "mode": "structured_fallback",
+        "reason": "SEMANTIC_SEARCH_FAILED",
+        "semanticQuery": "适合剪视频的电脑",
+        "resultCount": 1,
+    }
 
 
 async def _ignore_event(event_type, payload) -> None:

@@ -158,6 +158,14 @@ class GearMateAgent:
                     arguments=arguments,
                 )
             )
+        elif action.action == "product_detail" and action.product_id is not None:
+            automatic_tool_calls.append(
+                ModelToolCall(
+                    id=AUTOMATIC_ACTION_CALL_ID,
+                    name="get_product",
+                    arguments={"productId": action.product_id},
+                )
+            )
         elif (
             action.action in ("availability", "quote")
             and action.product_id is not None
@@ -186,6 +194,13 @@ class GearMateAgent:
             )
 
         async def preprocess(state: AgentState) -> dict[str, Any]:
+            if action.action == "product_detail" and action.product_id is None:
+                text = "请先指定一个准确商品或最近搜索结果中的位置。"
+                await write_event(
+                    "decision.made",
+                    {"outcome": "NEED_CLARIFICATION", "field": "productId"},
+                )
+                return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
             if action.action in ("availability", "quote") and action.product_id is None:
                 text = "请先指定一个准确的商品 ID，再查询库存或生成正式报价。"
                 await write_event(
