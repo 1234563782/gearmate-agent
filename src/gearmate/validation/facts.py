@@ -59,6 +59,7 @@ class FactSnapshot:
                 daily_rate=result.daily_rate,
                 fixed_deposit=result.fixed_deposit,
                 available_count=None,
+                use_cases=result.use_cases,
             )
         elif isinstance(result, AvailabilityResult):
             self.availability[result.product_id] = result
@@ -71,12 +72,9 @@ class FactSnapshot:
             raise TypeError(f"Unsupported fact result: {type(result).__name__}")
 
     def validate(self, text: str) -> FactValidationResult:
-        allowed_ids = set(self.products) | set(self.availability) | set(self.quotes)
-        allowed_ids.update(quote.product_id for quote in self.quotes.values())
         stated_ids = set(ULID_PATTERN.findall(text))
-        unsupported_ids = tuple(sorted(stated_ids - allowed_ids))
-        has_business_facts = bool(self.products or self.availability or self.quotes)
-        missing_fact_citation = has_business_facts and not bool(stated_ids & allowed_ids)
+        unsupported_ids = tuple(sorted(stated_ids))
+        missing_fact_citation = False
         allowed_amounts = self._allowed_amounts()
         stated_amounts = {
             self._money_value(first or second) for first, second in MONEY_PATTERN.findall(text)
@@ -121,11 +119,11 @@ class FactSnapshot:
         for kit in self.scenario_kits:
             for item in kit.items:
                 lines.append(
-                    f"- {item.role}: {item.product.name} × {item.quantity}"
-                    f"（ID: {item.product.product_id}，小计 {item.subtotal_daily_rate} 元/天）"
+                    f"- {item.product.name} × {item.quantity}："
+                    f"小计 {item.subtotal_daily_rate} 元/天"
                 )
             if kit.missing_roles:
-                lines.append("- 缺少设备角色: " + "、".join(kit.missing_roles))
+                lines.append("- 当前目录还缺少部分必要设备")
             lines.append(
                 f"- 组合日租合计 {kit.total_daily_rate} 元，"
                 f"预算 {kit.max_daily_budget} 元，"
@@ -139,7 +137,7 @@ class FactSnapshot:
         for product in list(self.products.values())[:5]:
             if product.product_id in kit_product_ids:
                 continue
-            line = f"- {product.name}（{product.brand} {product.model}，ID: {product.product_id}）"
+            line = f"- {product.name}（{product.brand} {product.model}）"
             available = self.availability.get(product.product_id)
             if available is not None:
                 line += (
@@ -154,21 +152,21 @@ class FactSnapshot:
             availability_text = (
                 f"可租 {available.available_count} 台" if available.available else "当前租期不可租"
             )
-            lines.append(f"- 商品 ID {product_id}：{availability_text}")
+            lines.append(f"- 这款设备：{availability_text}")
         for quote in self.quotes.values():
             snapshot = quote.price_snapshot
             lines.append(
-                f"- 报价 {quote.quote_id}：租金 {snapshot.rental_amount} 元，"
+                f"- 正式报价：租金 {snapshot.rental_amount} 元，"
                 f"押金 {snapshot.deposit_amount} 元，总计 {snapshot.total_amount} 元"
             )
         if not lines:
             if self.product_search_performed:
                 return (
-                    "RentFlow 当前没有返回符合这些搜索条件的商品。"
+                    "当前没有找到符合这些搜索条件的商品。"
                     "你可以调整商品类型、预算或租期后重试。"
                 )
             return "暂时没有取得可核验的商品、库存或报价信息，请补充商品和租期后重试。"
-        return "根据 RentFlow 本轮返回的结果：\n" + "\n".join(lines)
+        return "我查到的结果如下：\n" + "\n".join(lines)
 
     def _allowed_amounts(self) -> set[Decimal]:
         values = set(self.constraint_amounts)

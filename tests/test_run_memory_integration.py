@@ -755,7 +755,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
         }
     ]
     assert repository.finalized is not None
-    assert "可租 2 台" in repository.finalized["state"]["reply"]  # type: ignore[index]
+    assert "目前还有 2 台" in repository.finalized["state"]["reply"]  # type: ignore[index]
+    assert product_id not in repository.finalized["state"]["reply"]  # type: ignore[index]
     presentations = [
         payload
         for event_type, payload in repository.events

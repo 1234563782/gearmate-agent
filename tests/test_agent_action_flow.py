@@ -178,7 +178,8 @@ async def test_availability_without_product_id_clarifies_without_tools() -> None
     )
 
     assert result.stop_reason == "NEED_CLARIFICATION"
-    assert "商品 ID" in result.text
+    assert "点击卡片" in result.text
+    assert "商品 ID" not in result.text
     assert tools.calls == []
     assert model.requests == []
 
@@ -255,7 +256,7 @@ async def test_empty_exact_search_does_not_broaden_results() -> None:
     )
 
     assert model.requests == []
-    assert "没有返回符合这些搜索条件的商品" in result.text
+    assert "没有找到符合这些条件的设备" in result.text
 
 
 async def _ignore_event(event_type, payload):

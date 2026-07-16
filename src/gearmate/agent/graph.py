@@ -14,6 +14,7 @@ from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolCall
 from gearmate.prompts.loader import RenderedPrompt
 from gearmate.requirements import ScenarioPlan
+from gearmate.responses import UserResponseComposer
 from gearmate.search import ProductSearchPlanner
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
@@ -62,6 +63,18 @@ class GearMateAgent:
         write_event: EventWriter,
     ) -> AgentResult:
         facts = FactSnapshot()
+        if action.max_daily_rate is not None:
+            facts.add_constraint_amount(action.max_daily_rate)
+        if action.target_daily_rate is not None:
+            facts.add_constraint_amount(action.target_daily_rate)
+        response_composer = UserResponseComposer()
+
+        def grounded_response() -> str:
+            return response_composer.compose(
+                action=action,
+                facts=facts,
+                rental_period=rental_period,
+            )
         if scenario_plan is not None and scenario_plan.requirements.daily_budget is not None:
             facts.add_constraint_amount(scenario_plan.requirements.daily_budget)
             for need in scenario_plan.equipment_needs:
@@ -206,7 +219,10 @@ class GearMateAgent:
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
             if action.action in ("availability", "quote") and action.product_id is None:
-                text = "请先指定一个准确的商品 ID，再查询库存或生成正式报价。"
+                text = (
+                    "请先指定具体商品，例如点击卡片，"
+                    "或告诉我是最近搜索结果中的第几个，再查询库存或生成报价。"
+                )
                 await write_event(
                     "decision.made",
                     {"outcome": "NEED_CLARIFICATION", "field": "productId"},
@@ -235,7 +251,7 @@ class GearMateAgent:
         async def call_model(state: AgentState) -> dict[str, Any]:
             if state["model_rounds"] >= self._settings.max_model_rounds:
                 return {
-                    "final_text": facts.fallback_text(),
+                    "final_text": grounded_response(),
                     "stop_reason": "MAX_MODEL_ROUNDS",
                 }
             round_no = state["model_rounds"] + 1
@@ -279,7 +295,7 @@ class GearMateAgent:
             if next_count > self._settings.max_tool_calls:
                 return {
                     "pending_tool_calls": [],
-                    "final_text": facts.fallback_text(),
+                    "final_text": grounded_response(),
                     "stop_reason": "MAX_TOOL_CALLS",
                     "tool_call_count": state["tool_call_count"],
                 }
@@ -299,13 +315,13 @@ class GearMateAgent:
                 "tool_call_count": next_count,
             }
             if pending and all(call.id.startswith("automatic-") for call in pending):
-                update["final_text"] = facts.fallback_text()
+                update["final_text"] = grounded_response()
             return update
 
         async def validate_output(state: AgentState) -> dict[str, Any]:
             text = (state["final_text"] or "").strip()
             if not text:
-                text = facts.fallback_text()
+                text = grounded_response()
             validation = facts.validate(text)
             await write_event(
                 "output.validated",
@@ -320,13 +336,13 @@ class GearMateAgent:
             )
             if not validation.valid:
                 return {
-                    "final_text": facts.fallback_text(),
+                    "final_text": grounded_response(),
                     "stop_reason": "FACT_VALIDATION_FALLBACK",
                 }
             return {"final_text": text, "stop_reason": state["stop_reason"] or "COMPLETED"}
 
         async def finalize(state: AgentState) -> dict[str, Any]:
-            text = state["final_text"] or facts.fallback_text()
+            text = state["final_text"] or grounded_response()
             await write_event("assistant.delta", {"content": text})
             await write_event(
                 "assistant.completed",
@@ -373,7 +389,7 @@ class GearMateAgent:
         }
         final = await compiled.ainvoke(initial)
         return AgentResult(
-            text=final["final_text"] or facts.fallback_text(),
+            text=final["final_text"] or grounded_response(),
             stop_reason=final["stop_reason"] or "COMPLETED",
             error_code=final["error_code"],
             model_rounds=final["model_rounds"],

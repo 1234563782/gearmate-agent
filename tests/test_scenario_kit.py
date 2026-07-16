@@ -109,8 +109,5 @@ async def test_scenario_kit_is_complete_auditable_and_within_budget() -> None:
     assert events[0][0] == "tool.started"
     assert events[0][1]["arguments"] == {}
 
-    text = (
-        " ".join(f"{name} ID: {product_id}" for product_id, name, _ in ROLE_PRODUCTS.values())
-        + "，组合日租合计 460.00 元"
-    )
+    text = " ".join(name for _, name, _ in ROLE_PRODUCTS.values()) + "，组合日租合计 460.00 元"
     assert facts.validate(text).valid
