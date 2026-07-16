@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     catalog_sync_on_startup: bool = False
     catalog_sync_interval_seconds: float = 900.0
     catalog_sync_retry_seconds: float = 30.0
+    conversation_retention_hours: float = 24.0
+    conversation_cleanup_interval_seconds: float = 3600.0
     run_timeout_seconds: float = 180.0
     max_model_rounds: int = 6
     max_tool_calls: int = 10
@@ -96,6 +98,8 @@ class Settings(BaseSettings):
         "sse_heartbeat_seconds",
         "catalog_sync_interval_seconds",
         "catalog_sync_retry_seconds",
+        "conversation_retention_hours",
+        "conversation_cleanup_interval_seconds",
     )
     @classmethod
     def positive_timeout(cls, value: float) -> float:

@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -15,6 +16,7 @@ from gearmate.memory import (
     ConversationSummaryMemory,
 )
 from gearmate.persistence.models import (
+    ACTIVE_RUN_STATUSES,
     AgentRun,
     Conversation,
     ConversationState,
@@ -247,6 +249,23 @@ class AgentRepository:
                     )
                 )
             return len(stale)
+
+    async def delete_expired_conversations(self, inactive_before: datetime) -> int:
+        active_run = exists().where(
+            AgentRun.conversation_id == Conversation.id,
+            AgentRun.status.in_(ACTIVE_RUN_STATUSES),
+        )
+        async with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    delete(Conversation).where(
+                        Conversation.updated_at < inactive_before,
+                        ~active_run,
+                    )
+                ),
+            )
+            return int(result.rowcount or 0)
 
     async def require_run(self, run_id: str, user_id: str) -> RunRecord:
         async with self._sessions() as session:
@@ -600,7 +619,7 @@ class AgentRepository:
         self,
         conversation_id: str,
         limit: int = 20,
-    ) -> list[tuple[str, str]]:
+    ) -> list[ConversationMessageMemory]:
         async with self._sessions() as session:
             events = await session.scalars(
                 select(RunEvent)
@@ -614,10 +633,7 @@ class AgentRepository:
             )
             rows = list(reversed(list(events)))
             return [
-                (
-                    "user" if event.event_type == "user.message" else "assistant",
-                    str(event.payload.get("content") or ""),
-                )
+                self._memory_message(event)
                 for event in rows
                 if event.payload.get("content")
             ]

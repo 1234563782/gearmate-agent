@@ -29,7 +29,10 @@ class Base(DeclarativeBase):
 
 class Conversation(Base):
     __tablename__ = "conversations"
-    __table_args__ = (Index("idx_conversations_user_updated", "user_id", "updated_at"),)
+    __table_args__ = (
+        Index("idx_conversations_user_updated", "user_id", "updated_at"),
+        Index("idx_conversations_updated_at", "updated_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(26), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(26), nullable=False)

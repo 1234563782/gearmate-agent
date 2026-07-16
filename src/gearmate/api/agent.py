@@ -50,6 +50,13 @@ class ConversationResponse(ApiModel):
     updated_at: datetime
 
 
+class ConversationMessageResponse(ApiModel):
+    id: str
+    role: str
+    content: str
+    created_at: datetime
+
+
 class CreateRunRequest(ApiModel):
     message: str = Field(min_length=1, max_length=4000)
     rental_period: RentalPeriodInput | None = None
@@ -105,6 +112,32 @@ async def list_conversations(
     conversations = await repo.list_conversations(user.user_id)
     return [
         ConversationResponse.model_validate(item, from_attributes=True) for item in conversations
+    ]
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=list[ConversationMessageResponse],
+)
+async def list_conversation_messages(
+    conversation_id: str,
+    user: Annotated[CurrentUser, Depends(current_user)],
+    repo: Annotated[AgentRepository, Depends(repository)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> list[ConversationMessageResponse]:
+    try:
+        await repo.require_conversation(conversation_id, user.user_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    messages = await repo.conversation_messages(conversation_id, limit)
+    return [
+        ConversationMessageResponse(
+            id=message.event_id,
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at,
+        )
+        for message in messages
     ]
 
 

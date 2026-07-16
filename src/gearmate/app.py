@@ -26,8 +26,10 @@ async def catalog_sync_loop(
     catalog_search: CatalogSearchService,
     rentflow: RentFlowClient,
     settings: Settings,
+    *,
+    initial_delay: float,
 ) -> None:
-    delay = settings.catalog_sync_interval_seconds
+    delay = initial_delay
     while True:
         await asyncio.sleep(delay)
         try:
@@ -41,6 +43,34 @@ async def catalog_sync_loop(
             delay = settings.catalog_sync_retry_seconds
 
 
+async def delete_expired_conversations(
+    repository: AgentRepository,
+    settings: Settings,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    reference = now_utc or datetime.now(UTC)
+    inactive_before = reference - timedelta(hours=settings.conversation_retention_hours)
+    deleted = await repository.delete_expired_conversations(inactive_before)
+    if deleted:
+        logger.info("Deleted %d expired conversations", deleted)
+    return deleted
+
+
+async def conversation_cleanup_loop(
+    repository: AgentRepository,
+    settings: Settings,
+) -> None:
+    while True:
+        await asyncio.sleep(settings.conversation_cleanup_interval_seconds)
+        try:
+            await delete_expired_conversations(repository, settings)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Expired conversation cleanup failed")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
 
@@ -52,6 +82,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             seconds=resolved_settings.run_timeout_seconds * 2
         )
         await repository.fail_stale_active_runs(stale_before)
+        try:
+            await delete_expired_conversations(repository, resolved_settings)
+        except Exception:
+            logger.exception("Expired conversation cleanup failed")
+        conversation_cleanup_task = asyncio.create_task(
+            conversation_cleanup_loop(repository, resolved_settings),
+            name="gearmate-conversation-cleanup",
+        )
         timeout = httpx.Timeout(
             connect=resolved_settings.rentflow_connect_timeout_seconds,
             read=resolved_settings.rentflow_read_timeout_seconds,
@@ -77,17 +115,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 vector_weight=resolved_settings.semantic_vector_weight,
                 lexical_weight=resolved_settings.semantic_lexical_weight,
             )
+            catalog_sync_initial_delay = resolved_settings.catalog_sync_interval_seconds
             if resolved_settings.catalog_sync_on_startup:
                 try:
                     stats = await catalog_search.refresh(RentFlowClient(rentflow_http, ""))
                     logger.info("Catalog semantic index refreshed: %s", stats)
                 except Exception:
                     logger.exception("Catalog semantic index refresh failed")
+                    catalog_sync_initial_delay = resolved_settings.catalog_sync_retry_seconds
             catalog_sync_task = asyncio.create_task(
                 catalog_sync_loop(
                     catalog_search,
                     RentFlowClient(rentflow_http, ""),
                     resolved_settings,
+                    initial_delay=catalog_sync_initial_delay,
                 ),
                 name="gearmate-catalog-sync",
             )
@@ -106,6 +147,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await run_coordinator.close()
+            conversation_cleanup_task.cancel()
+            await asyncio.gather(conversation_cleanup_task, return_exceptions=True)
             if catalog_sync_task is not None:
                 catalog_sync_task.cancel()
                 await asyncio.gather(catalog_sync_task, return_exceptions=True)
