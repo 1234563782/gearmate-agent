@@ -57,8 +57,6 @@ class UserResponseComposer:
             lines.append("我已经按你给出的租期核验库存，点开卡片即可查看完整报价并预订。")
         else:
             lines.append("目前显示的是日租参考价；选定租期后，我可以继续查询实时库存和总价。")
-        if len(products) > 1:
-            lines.append("还可以继续告诉我你更看重性能、便携性还是预算，我会进一步缩小范围。")
         return "\n".join(lines)
 
     @staticmethod

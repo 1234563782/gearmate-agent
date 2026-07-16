@@ -32,6 +32,7 @@ class RecommendationCard(RecommendationModel):
 class RecommendationSection(RecommendationModel):
     use_case_id: str | None
     title: str
+    description: str
     products: tuple[RecommendationCard, ...]
 
 
@@ -48,9 +49,11 @@ class FollowUpQuestion(RecommendationModel):
 
 class RecommendationPresentation(RecommendationModel):
     mode: Literal["explore", "recommend"]
+    intro: str
     sections: tuple[RecommendationSection, ...]
     rental_period: RentalPeriodInput | None = None
     follow_up: FollowUpQuestion | None = None
+    closing: str | None = None
 
 
 class RecommendationPlanner:
@@ -78,6 +81,7 @@ class RecommendationPlanner:
                 RecommendationSection(
                     use_case_id=None,
                     title=f"接近日租 ¥{action.target_daily_rate}",
+                    description="这些设备按与目标日租的接近程度排列，优先看前面的候选。",
                     products=cards,
                 ),
             )
@@ -97,9 +101,11 @@ class RecommendationPlanner:
             )
             return RecommendationPresentation(
                 mode="explore",
+                intro=self._intro(action, sections),
                 sections=sections,
                 rental_period=rental_period,
                 follow_up=follow_up,
+                closing=self._closing(rental_period),
             )
         follow_up = None
         if rental_period is None:
@@ -109,9 +115,11 @@ class RecommendationPlanner:
             )
         return RecommendationPresentation(
             mode="recommend",
+            intro=self._intro(action, sections),
             sections=sections,
             rental_period=rental_period,
             follow_up=follow_up,
+            closing=self._closing(rental_period),
         )
 
     def plan_exact(
@@ -134,8 +142,10 @@ class RecommendationPlanner:
         )
         return RecommendationPresentation(
             mode="recommend",
+            intro="这个租期的实时库存已经核验，下面是你选中的设备。",
             sections=self._sections((card,), None),
             rental_period=rental_period,
+            closing="点开卡片可以查看完整报价并继续预订。",
         )
 
     @staticmethod
@@ -159,6 +169,11 @@ class RecommendationPlanner:
             RecommendationSection(
                 use_case_id=use_case_id,
                 title=title,
+                description=(
+                    f"这些设备在目录中与“{title}”场景匹配度较高。"
+                    if use_case_id is not None
+                    else "下面是与当前条件匹配度较高的设备。"
+                ),
                 products=tuple(items),
             )
             for (use_case_id, title), items in grouped.items()
@@ -177,3 +192,22 @@ class RecommendationPlanner:
             FollowUpOption(value=use_case_id, label=name)
             for (use_case_id, name), _score in ranked
         )
+
+    @staticmethod
+    def _intro(
+        action: AgentAction,
+        sections: tuple[RecommendationSection, ...],
+    ) -> str:
+        if action.target_daily_rate is not None:
+            return f"我按你的用途和目标日租 ¥{action.target_daily_rate} 整理了这些候选。"
+        if action.max_daily_rate is not None:
+            return f"我按你的用途和日租不超过 ¥{action.max_daily_rate} 整理了这些候选。"
+        if action.use_case_id is not None and sections:
+            return f"我按“{sections[0].title}”场景进一步缩小了范围。"
+        return "如果你还没确定具体用途，可以先从下面几个场景了解合适的设备。"
+
+    @staticmethod
+    def _closing(rental_period: RentalPeriodInput | None) -> str:
+        if rental_period is not None:
+            return "这些设备已按你提供的租期核验库存，点开卡片可以查看报价并预订。"
+        return "可以先选择主要用途，也可以直接点开卡片填写租期并查询报价。"

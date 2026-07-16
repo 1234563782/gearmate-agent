@@ -396,7 +396,28 @@ class RunCoordinator:
                         )
                         await write_event("recommendation.presented", presentation_payload)
             if action.action == "product_search" and result.tool_call_count > 0:
-                await self._memory.clear_pending_product_search(conversation_id)
+                follow_up = (
+                    presentation_payload.get("followUp")
+                    if presentation_payload is not None
+                    else None
+                )
+                if isinstance(follow_up, dict) and follow_up.get("field") in {
+                    "use_case",
+                    "rental_period",
+                }:
+                    if (
+                        follow_up.get("field") == "rental_period"
+                        and pending_product_search is not None
+                    ):
+                        pending_product_search = pending_product_search.model_copy(
+                            update={"waiting_for_rental_period": True}
+                        )
+                        await self._memory.remember_pending_product_search(
+                            conversation_id,
+                            pending_product_search,
+                        )
+                else:
+                    await self._memory.clear_pending_product_search(conversation_id)
             if action.action in ("availability", "quote") and result.tool_call_count > 0:
                 await self._memory.clear_pending_rental_action(conversation_id)
             preprocessing_usage = self._combine_usage(

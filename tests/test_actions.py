@@ -117,6 +117,16 @@ def test_price_intent_keeps_explicit_upper_limit_as_hard_filter() -> None:
     assert action.target_daily_rate is None
 
 
+def test_new_search_without_price_drops_model_carried_price() -> None:
+    action = normalize_price_intent(
+        "我想租电脑",
+        AgentAction(action="product_search", target_daily_rate="150"),
+    )
+
+    assert action.max_daily_rate is None
+    assert action.target_daily_rate is None
+
+
 async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:
     model = FakeModel({"action": "chat"})
 
@@ -163,6 +173,31 @@ async def test_resolver_receives_database_catalog_aliases() -> None:
     prompt = model.requests[0].messages[0].content
     assert '"alias": "苹果电脑"' in prompt
     assert '"canonicalValue": "Apple"' in prompt
+
+
+async def test_resolver_accepts_equipment_role_discovered_from_catalog() -> None:
+    model = FakeModel(
+        {
+            "action": "product_search",
+            "equipmentRole": "smartphone",
+        }
+    )
+
+    result = await AgentActionResolver(("laptop",)).resolve(
+        message="我想租手机",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+        catalog_vocabulary=CatalogVocabulary(equipment_roles=("smartphone",)),
+    )
+
+    assert result.action is not None
+    assert result.action.equipment_role == "smartphone"
+    role_schema = model.requests[0].tools[0].parameters["properties"]["equipmentRole"]
+    assert role_schema["anyOf"][0]["enum"] == ["laptop", "smartphone"]
 
 
 async def test_resolver_maps_dynamic_use_case_alias_without_hardcoded_values() -> None:
@@ -287,6 +322,25 @@ def test_new_search_does_not_inherit_pending_search_fields() -> None:
     resolved = merge_pending_product_search(new_search, pending)
 
     assert resolved == new_search
+
+
+def test_changed_equipment_role_overrides_pending_search_even_when_model_marks_continue() -> None:
+    pending = PendingProductSearch(
+        equipment_role="laptop",
+        use_case_id="01J00000000000000000000202",
+        waiting_for_rental_period=True,
+    )
+    new_search = AgentAction(
+        action="product_search",
+        equipment_role="smartphone",
+        continues_pending=True,
+    )
+
+    resolved = merge_pending_product_search(new_search, pending)
+
+    assert resolved.equipment_role == "smartphone"
+    assert resolved.use_case_id is None
+    assert resolved.continues_pending is False
 
 
 def test_pending_availability_keeps_selected_product_during_confirmation() -> None:

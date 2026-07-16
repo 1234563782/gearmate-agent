@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     rentflow_read_timeout_seconds: float = 20.0
     tool_timeout_seconds: float = 30.0
     catalog_equipment_roles: str = (
-        "action_camera,camera,capture_card,drone,laptop,lens,lighting,microphone,projector,tripod"
+        "action_camera,camera,capture_card,drone,laptop,lens,lighting,microphone,projector,"
+        "smartphone,tripod"
     )
     jwt_public_key_path: Path | None = None
     jwt_issuer: str = "rentflow-server"

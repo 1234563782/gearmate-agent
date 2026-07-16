@@ -664,6 +664,113 @@ async def test_new_product_search_does_not_replay_saved_scenario() -> None:
     assert retrieval_events == [{"mode": "structured", "resultCount": 1}]
 
 
+async def test_changed_product_category_does_not_inherit_pending_use_case() -> None:
+    repository = FakeRepository("我想租手机")
+    repository.state = ConversationStateMemory(
+        None,
+        None,
+        None,
+        PendingProductSearch(
+            equipment_role="laptop",
+            use_case_id="01J00000000000000000000202",
+            waiting_for_rental_period=True,
+        ),
+        None,
+        None,
+    )
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="",
+                finish_reason="tool_calls",
+                usage=ModelUsage(input_tokens=10, output_tokens=2),
+                tool_calls=(
+                    ModelToolCall(
+                        id="action-smartphone-search",
+                        name="resolve_agent_action",
+                        arguments={
+                            "action": "product_search",
+                            "equipmentRole": "smartphone",
+                            "continuesPending": True,
+                        },
+                    ),
+                ),
+            )
+        ]
+    )
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "productId": "01J00000000000000000000121",
+                        "categoryId": "01J00000000000000000000010",
+                        "equipmentRole": "smartphone",
+                        "name": "iPhone 15 Pro Max",
+                        "brand": "Apple",
+                        "model": "iPhone 15 Pro Max",
+                        "dailyRate": "120.00",
+                        "fixedDeposit": "4500.00",
+                    }
+                ],
+                "page": 0,
+                "size": 20,
+                "totalElements": 1,
+                "totalPages": 1,
+            },
+        )
+
+    settings = Settings(_env_file=None)
+    async with httpx.AsyncClient(
+        base_url="http://localhost:8080",
+        transport=httpx.MockTransport(handle),
+    ) as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+
+        await coordinator._execute(
+            run_id="run-smartphone-search",
+            conversation_id="conversation-category-change",
+            access_token="token",
+            message="我想租手机",
+            rental_period=None,
+        )
+
+    assert len(requests) == 1
+    assert requests[0].url.params["equipmentRole"] == "smartphone"
+    assert "useCaseId" not in requests[0].url.params
+    resolved_actions = [
+        payload for event, payload in repository.events if event == "action.resolved"
+    ]
+    assert resolved_actions == [
+        {
+            "action": "product_search",
+            "keyword": None,
+            "keywordSpecificity": None,
+            "equipmentRole": "smartphone",
+            "brand": None,
+            "model": None,
+            "semanticQuery": None,
+            "useCaseId": None,
+            "categoryId": None,
+            "productId": None,
+            "productPosition": None,
+            "maxDailyRate": None,
+            "targetDailyRate": None,
+            "continuesPending": False,
+        }
+    ]
+
+
 async def test_saved_valid_period_is_reused_for_availability() -> None:
     product_id = "01J00000000000000000000101"
     period = RentalPeriodInput(
@@ -891,8 +998,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
                         id="confirmed-period",
                         name="set_rental_period",
                         arguments={
-                            "startAt": "2026-07-16T18:00:00+08:00",
-                            "endAt": "2026-07-17T18:00:00+08:00",
+                            "startAt": "2026-07-20T18:00:00+08:00",
+                            "endAt": "2026-07-21T18:00:00+08:00",
                         },
                     ),
                 ),
@@ -907,8 +1014,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
             200,
             json={
                 "productId": product_id,
-                "startAt": "2026-07-16T10:00:00Z",
-                "endAt": "2026-07-17T10:00:00Z",
+                "startAt": "2026-07-20T10:00:00Z",
+                "endAt": "2026-07-21T10:00:00Z",
                 "available": True,
                 "availableCount": 1,
                 "checkedAt": "2026-07-15T09:00:00Z",
@@ -936,8 +1043,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
 
     assert bodies == [
         {
-            "startAt": "2026-07-16T18:00:00+08:00",
-            "endAt": "2026-07-17T18:00:00+08:00",
+            "startAt": "2026-07-20T18:00:00+08:00",
+            "endAt": "2026-07-21T18:00:00+08:00",
             "productId": product_id,
         }
     ]

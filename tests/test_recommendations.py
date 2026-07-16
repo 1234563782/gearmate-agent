@@ -59,7 +59,9 @@ def test_explore_presentation_uses_dynamic_use_cases_for_sections_and_question()
     )
 
     assert presentation.mode == "explore"
+    assert "具体用途" in presentation.intro
     assert presentation.sections[0].title == "视频剪辑"
+    assert "视频剪辑" in presentation.sections[0].description
     assert presentation.sections[0].products[0].product_id == result.items[0].product_id
     assert presentation.follow_up is not None
     assert [option.label for option in presentation.follow_up.options] == [
@@ -98,6 +100,7 @@ def test_selected_use_case_asks_only_for_missing_rental_period() -> None:
     assert presentation.follow_up.field == "rental_period"
     assert presentation.follow_up.options == ()
     assert presentation.rental_period is None
+    assert presentation.closing is not None
 
 
 def test_exact_result_keeps_period_and_live_availability() -> None:
@@ -124,6 +127,7 @@ def test_exact_result_keeps_period_and_live_availability() -> None:
     assert presentation.rental_period == period
     assert presentation.follow_up is None
     assert presentation.sections[0].products[0].available_count == 2
+    assert presentation.closing == "点开卡片可以查看完整报价并继续预订。"
 
 
 def test_target_price_presentation_preserves_price_distance_order() -> None:
@@ -150,6 +154,7 @@ def test_target_price_presentation_preserves_price_distance_order() -> None:
     )
 
     assert presentation.sections[0].title == "接近日租 ¥150"
+    assert "目标日租" in presentation.intro
     assert [item.name for item in presentation.sections[0].products] == [
         "MacBook Pro 14",
         "Dell XPS 15",

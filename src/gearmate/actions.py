@@ -140,6 +140,12 @@ def merge_pending_product_search(
         and action.continues_pending
         and pending_product_search is not None
     ):
+        if (
+            action.equipment_role is not None
+            and pending_product_search.equipment_role is not None
+            and action.equipment_role != pending_product_search.equipment_role
+        ):
+            return action.model_copy(update={"continues_pending": False})
         return pending_product_search.merge_into(action)
     return action
 
@@ -203,7 +209,9 @@ def normalize_price_intent(message: str, action: AgentAction) -> AgentAction:
         or DAILY_PRICE.search(message)
     )
     if preferred is None:
-        return action
+        return action.model_copy(
+            update={"max_daily_rate": None, "target_daily_rate": None}
+        )
     return action.model_copy(
         update={
             "max_daily_rate": None,
@@ -309,12 +317,12 @@ class AgentActionResolver:
     def __init__(self, equipment_roles: tuple[str, ...]) -> None:
         self._equipment_roles = equipment_roles
 
-    def _action_schema(self) -> dict[str, Any]:
+    def _action_schema(self, equipment_roles: tuple[str, ...]) -> dict[str, Any]:
         schema = AgentAction.model_json_schema(by_alias=True)
         equipment_role = schema["properties"]["equipmentRole"]
         equipment_role["anyOf"][0] = {
             "type": "string",
-            "enum": list(self._equipment_roles),
+            "enum": list(equipment_roles),
         }
         return schema
 
@@ -332,6 +340,14 @@ class AgentActionResolver:
         recent_product_ids: tuple[str, ...] = (),
         catalog_vocabulary: CatalogVocabulary | None = None,
     ) -> AgentActionResolution:
+        equipment_roles = tuple(
+            dict.fromkeys(
+                (
+                    *self._equipment_roles,
+                    *(catalog_vocabulary.equipment_roles if catalog_vocabulary else ()),
+                )
+            )
+        )
         recent_history = [item for item in history if item.role in ("user", "assistant")][-6:]
         if (
             not recent_history
@@ -348,7 +364,7 @@ class AgentActionResolver:
                             current_scenario_id,
                             pending_product_search,
                             pending_rental_action,
-                            self._equipment_roles,
+                            equipment_roles,
                             recent_product_search_json,
                             catalog_vocabulary,
                         ),
@@ -359,7 +375,7 @@ class AgentActionResolver:
                     ModelToolDefinition(
                         name=ACTION_RESOLVER_TOOL_NAME,
                         description="Return the structured action for the current user turn.",
-                        parameters=self._action_schema(),
+                        parameters=self._action_schema(equipment_roles),
                     ),
                 ),
                 max_output_tokens=max_output_tokens,
@@ -403,7 +419,7 @@ class AgentActionResolver:
                     )
             if (
                 action.equipment_role is not None
-                and action.equipment_role not in self._equipment_roles
+                and action.equipment_role not in equipment_roles
             ):
                 return AgentActionResolution(
                     action=None,
