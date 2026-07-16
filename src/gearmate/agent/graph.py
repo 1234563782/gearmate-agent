@@ -151,6 +151,8 @@ class GearMateAgent:
                 arguments["categoryId"] = plan.category_id
             if plan.max_daily_rate is not None:
                 arguments["maxDailyRate"] = str(plan.max_daily_rate)
+            if plan.target_daily_rate is not None:
+                arguments["targetDailyRate"] = str(plan.target_daily_rate)
             if rental_period is not None:
                 arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
             automatic_tool_calls.append(

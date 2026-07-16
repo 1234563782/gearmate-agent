@@ -305,6 +305,7 @@ class ToolRegistry:
         if request.semantic_query and self._catalog_search is not None:
             try:
                 semantic_result = await self._semantic_products(request)
+                semantic_result = self._apply_price_preference(semantic_result, request)
                 if semantic_result.items:
                     self._last_product_search_result = semantic_result
                     return semantic_result
@@ -321,6 +322,7 @@ class ToolRegistry:
                     "semanticQuery": request.semantic_query,
                 }
         result = await self._rentflow.search_products(request)
+        result = self._apply_price_preference(result, request)
         diagnostics = self._last_search_diagnostics or {}
         self._last_search_diagnostics = {
             **diagnostics,
@@ -358,6 +360,42 @@ class ToolRegistry:
         )
         self._last_product_search_result = filtered_result
         return filtered_result
+
+    @staticmethod
+    def _apply_price_preference(
+        result: ProductSearchResult,
+        request: ProductSearchInput,
+    ) -> ProductSearchResult:
+        items = result.items
+        if request.max_daily_rate is not None:
+            items = tuple(
+                item
+                for item in items
+                if Decimal(item.daily_rate) <= request.max_daily_rate
+            )
+        if request.target_daily_rate is not None:
+            target_daily_rate = request.target_daily_rate
+            original_positions = {
+                item.product_id: index for index, item in enumerate(items)
+            }
+            items = tuple(
+                sorted(
+                    items,
+                    key=lambda item: (
+                        abs(Decimal(item.daily_rate) - target_daily_rate),
+                        original_positions[item.product_id],
+                    ),
+                )
+            )
+        if items == result.items:
+            return result
+        return result.model_copy(
+            update={
+                "items": items,
+                "total_elements": len(items),
+                "total_pages": 1 if items else 0,
+            }
+        )
 
     async def _get_product(self, request: ProductDetailInput) -> BaseModel:
         return await self._rentflow.get_product(request.product_id)

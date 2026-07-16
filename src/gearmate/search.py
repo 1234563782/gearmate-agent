@@ -67,6 +67,7 @@ class ProductSearchPlan:
     use_case_id: str | None
     category_id: str | None
     max_daily_rate: Decimal | None
+    target_daily_rate: Decimal | None
 
 
 class ProductSearchPlanner:
@@ -85,4 +86,5 @@ class ProductSearchPlanner:
             use_case_id=action.use_case_id,
             category_id=action.category_id,
             max_daily_rate=action.max_daily_rate,
+            target_daily_rate=action.target_daily_rate,
         )

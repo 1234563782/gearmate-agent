@@ -73,7 +73,17 @@ class RecommendationPlanner:
             )
             for item in result.items[:4]
         )
-        sections = self._sections(cards, action.use_case_id)
+        sections = (
+            (
+                RecommendationSection(
+                    use_case_id=None,
+                    title=f"接近日租 ¥{action.target_daily_rate}",
+                    products=cards,
+                ),
+            )
+            if action.target_daily_rate is not None
+            else self._sections(cards, action.use_case_id)
+        )
         if action.use_case_id is None:
             options = self._use_case_options(cards)
             follow_up = (

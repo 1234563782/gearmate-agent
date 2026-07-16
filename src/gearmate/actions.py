@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -16,6 +17,24 @@ from gearmate.llm.types import (
 )
 
 ACTION_RESOLVER_TOOL_NAME = "resolve_agent_action"
+PRICE_AMOUNT = r"(?P<amount>\d+(?:\.\d{1,2})?)"
+HARD_MAX_PRICE = re.compile(
+    rf"(?:不超过|不高于|最高|最多|以内|以下|预算(?:上限)?|at\s+most|up\s+to|under)"
+    rf"[^\d]{{0,12}}{PRICE_AMOUNT}",
+    re.IGNORECASE,
+)
+APPROXIMATE_PRICE_PREFIX = re.compile(
+    rf"(?:大约|大概|约|接近|around|about)[^\d]{{0,8}}{PRICE_AMOUNT}",
+    re.IGNORECASE,
+)
+APPROXIMATE_PRICE_SUFFIX = re.compile(
+    rf"{PRICE_AMOUNT}\s*(?:元)?\s*(?:左右|上下|附近)",
+    re.IGNORECASE,
+)
+DAILY_PRICE = re.compile(
+    rf"(?:每天|每日|一天|日租|每晚|per\s+day)[^\d]{{0,8}}{PRICE_AMOUNT}",
+    re.IGNORECASE,
+)
 AgentActionName = Literal[
     "chat",
     "product_search",
@@ -48,6 +67,7 @@ class AgentAction(BaseModel):
     product_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_position: int | None = Field(default=None, ge=1, le=100)
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
+    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     continues_pending: bool = False
 
 
@@ -68,6 +88,7 @@ class PendingProductSearch(BaseModel):
     use_case_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
+    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     waiting_for_rental_period: bool = False
 
     @classmethod
@@ -87,6 +108,7 @@ class PendingProductSearch(BaseModel):
             use_case_id=action.use_case_id,
             category_id=action.category_id,
             max_daily_rate=action.max_daily_rate,
+            target_daily_rate=action.target_daily_rate,
             waiting_for_rental_period=waiting_for_rental_period,
         )
 
@@ -104,6 +126,7 @@ class PendingProductSearch(BaseModel):
                 "use_case_id": action.use_case_id or self.use_case_id,
                 "category_id": action.category_id or self.category_id,
                 "max_daily_rate": action.max_daily_rate or self.max_daily_rate,
+                "target_daily_rate": action.target_daily_rate or self.target_daily_rate,
             }
         )
 
@@ -161,6 +184,32 @@ class AgentActionResolution:
     action: AgentAction | None
     clarification: str | None
     usage: ModelUsage
+
+
+def normalize_price_intent(message: str, action: AgentAction) -> AgentAction:
+    if action.action != "product_search":
+        return action
+    hard_max = HARD_MAX_PRICE.search(message)
+    if hard_max is not None:
+        return action.model_copy(
+            update={
+                "max_daily_rate": Decimal(hard_max.group("amount")),
+                "target_daily_rate": None,
+            }
+        )
+    preferred = (
+        APPROXIMATE_PRICE_PREFIX.search(message)
+        or APPROXIMATE_PRICE_SUFFIX.search(message)
+        or DAILY_PRICE.search(message)
+    )
+    if preferred is None:
+        return action
+    return action.model_copy(
+        update={
+            "max_daily_rate": None,
+            "target_daily_rate": Decimal(preferred.group("amount")),
+        }
+    )
 
 
 def action_resolver_system_prompt(
@@ -224,7 +273,10 @@ Choose one action based on meaning, in any user language:
 - product_search: browse, find, compare, or ask about products/categories. Extract a concise
   catalog intent, canonical English equipmentRole, brand, model, semantic use-case query, dynamic
   useCaseId from an authoritative use_case alias, and
-  optional category ID or maximum daily rate. A generic category word already represented by
+  optional category ID or price constraint. Use maxDailyRate only for a hard upper limit such as
+  "under 200 per day" or "at most 200". Use targetDailyRate for a desired/approximate price such
+  as "around 200 per day" or "I want the daily price to be 200"; do not turn an approximate
+  target into a hard maximum. A generic category word already represented by
   equipmentRole must not be returned as keyword. Set keywordSpecificity=specific only for a real
   model fragment or subtype that must additionally narrow the role; otherwise omit keyword.
   Put manufacturers in brand, exact product models in model, and purpose or use-case language in
@@ -327,6 +379,7 @@ class AgentActionResolver:
                     clarification="请明确要搜索商品、查询库存、生成报价，还是继续设备方案。",
                     usage=response.usage,
                 )
+            action = normalize_price_intent(message, action)
             if action.product_position is not None:
                 index = action.product_position - 1
                 if index >= len(recent_product_ids):

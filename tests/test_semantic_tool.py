@@ -157,5 +157,54 @@ async def test_semantic_failure_falls_back_to_structured_search() -> None:
     }
 
 
+def test_price_preference_filters_hard_maximum_and_ranks_nearest_target() -> None:
+    result = ProductSearchResult(
+        items=(
+            ProductSummary(
+                product_id="01J00000000000000000000101",
+                category_id="01J00000000000000000000001",
+                equipment_role="camera",
+                name="Budget Camera",
+                brand="Demo",
+                model="Budget",
+                daily_rate="90.00",
+                fixed_deposit="500.00",
+            ),
+            ProductSummary(
+                product_id="01J00000000000000000000102",
+                category_id="01J00000000000000000000001",
+                equipment_role="camera",
+                name="Target Camera",
+                brand="Demo",
+                model="Target",
+                daily_rate="160.00",
+                fixed_deposit="500.00",
+            ),
+            ProductSummary(
+                product_id="01J00000000000000000000103",
+                category_id="01J00000000000000000000001",
+                equipment_role="camera",
+                name="Expensive Camera",
+                brand="Demo",
+                model="Expensive",
+                daily_rate="320.00",
+                fixed_deposit="500.00",
+            ),
+        ),
+        page=0,
+        size=20,
+        total_elements=3,
+        total_pages=1,
+    )
+
+    ranked = ToolRegistry._apply_price_preference(
+        result,
+        ProductSearchInput(max_daily_rate="200", target_daily_rate="150"),
+    )
+
+    assert [item.daily_rate for item in ranked.items] == ["160.00", "90.00"]
+    assert ranked.total_elements == 2
+
+
 async def _ignore_event(event_type, payload) -> None:
     return None

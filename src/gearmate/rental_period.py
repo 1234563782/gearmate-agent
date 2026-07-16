@@ -24,6 +24,18 @@ TEMPORAL_SIGNAL = re.compile(
     re.IGNORECASE,
 )
 
+EXPLICIT_TIME_RANGE = re.compile(
+    r"(?:[零〇一二两三四五六七八九十百\d]{1,3}\s*(?:点|时)"
+    r"(?:\s*[零〇一二两三四五六七八九十百\d]{1,3}\s*分?)?.*?"
+    r"(?:到|至|~|—|\uff0d)\s*.*?"
+    r"[零〇一二两三四五六七八九十百\d]{1,3}\s*(?:点|时)"
+    r"(?:\s*[零〇一二两三四五六七八九十百\d]{1,3}\s*分?)?|"
+    r"\d{1,2}:\d{2}.*?(?:到|至|~|—|\uff0d)\s*.*?\d{1,2}:\d{2}|"
+    r"\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2}.*?"
+    r"(?:到|至|~|—|\uff0d).*?\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2})",
+    re.IGNORECASE,
+)
+
 RESOLVER_TOOL_NAME = "set_rental_period"
 
 
@@ -71,6 +83,10 @@ def has_temporal_signal(message: str) -> bool:
     return TEMPORAL_SIGNAL.search(message) is not None
 
 
+def has_explicit_time_range(message: str) -> bool:
+    return EXPLICIT_TIME_RANGE.search(message) is not None
+
+
 def resolver_system_prompt(
     timezone: str,
     now_utc: datetime,
@@ -84,7 +100,8 @@ def resolver_system_prompt(
 
 规则:
 1. 相对日期必须以上述用户当地时间为基准。
-2. 只有开始日期、开始时间、结束日期、结束时间都能唯一确定时, 才调用 {RESOLVER_TOOL_NAME}。
+2. 只有开始日期、开始时间、结束日期、结束时间都能唯一确定时, 才调用 {RESOLVER_TOOL_NAME};
+   一旦四项都明确, 必须调用工具, 不要再用文字重复确认。
 3. 输出时间必须包含用户时区对应的 UTC offset。
 4. "上午"、"下午"、"晚上"、"周末"等没有具体时分的表达不算完整。
 5. 信息不完整或有多种解释时不要调用工具, 只返回一个简洁的中文确认问题。
@@ -136,6 +153,9 @@ class RentalPeriodResolver:
             ),
             max_output_tokens=max_output_tokens,
             temperature=0.0,
+            tool_choice=(
+                RESOLVER_TOOL_NAME if has_explicit_time_range(message) else "auto"
+            ),
             enable_thinking=False,
         )
         response = await model.complete(request)

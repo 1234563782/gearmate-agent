@@ -130,6 +130,32 @@ async def test_generic_laptop_search_drops_redundant_keyword() -> None:
     assert tools.calls[0].arguments["brand"] == "Apple"
 
 
+async def test_product_search_routes_target_price_without_turning_it_into_maximum() -> None:
+    model = FakeModel()
+    tools = FakeTools()
+
+    await GearMateAgent(
+        model,
+        tools,  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        RenderedPrompt(version="test", content_hash="hash", content="system"),
+    ).run(
+        message="我想租每天 150 元左右的电脑",
+        history=[],
+        rental_period=None,
+        scenario_plan=None,
+        action=AgentAction(
+            action="product_search",
+            equipment_role="laptop",
+            target_daily_rate="150",
+        ),
+        write_event=_ignore_event,
+    )
+
+    assert tools.calls[0].arguments["targetDailyRate"] == "150"
+    assert "maxDailyRate" not in tools.calls[0].arguments
+
+
 async def test_availability_without_product_id_clarifies_without_tools() -> None:
     model = FakeModel()
     tools = FakeTools()

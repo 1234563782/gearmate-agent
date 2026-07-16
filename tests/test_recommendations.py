@@ -124,3 +124,34 @@ def test_exact_result_keeps_period_and_live_availability() -> None:
     assert presentation.rental_period == period
     assert presentation.follow_up is None
     assert presentation.sections[0].products[0].available_count == 2
+
+
+def test_target_price_presentation_preserves_price_distance_order() -> None:
+    result = ProductSearchResult(
+        items=(
+            product("01J00000000000000000000105", "MacBook Pro 14", ()),
+            product("01J00000000000000000000111", "Dell XPS 15", ()),
+            product("01J00000000000000000000112", "Lenovo Legion", ()),
+        ),
+        page=0,
+        size=20,
+        total_elements=3,
+        total_pages=1,
+    )
+
+    presentation = RecommendationPlanner().plan(
+        result,
+        AgentAction(
+            action="product_search",
+            equipment_role="laptop",
+            target_daily_rate="150",
+        ),
+        None,
+    )
+
+    assert presentation.sections[0].title == "接近日租 ¥150"
+    assert [item.name for item in presentation.sections[0].products] == [
+        "MacBook Pro 14",
+        "Dell XPS 15",
+        "Lenovo Legion",
+    ]

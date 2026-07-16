@@ -41,6 +41,7 @@ class ProductSearchInput(ToolModel):
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     rental_period: RentalPeriodInput | None = None
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
+    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     page: int = Field(default=0, ge=0)
     size: int = Field(default=20, ge=1, le=100)
 

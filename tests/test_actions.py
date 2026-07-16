@@ -5,6 +5,7 @@ from gearmate.actions import (
     PendingRentalAction,
     merge_pending_product_search,
     merge_pending_rental_action,
+    normalize_price_intent,
 )
 from gearmate.catalog import CatalogAliasTerm, CatalogVocabulary
 from gearmate.llm.types import (
@@ -70,6 +71,50 @@ async def test_resolver_returns_structured_product_search() -> None:
     equipment_role_schema = model.requests[0].tools[0].parameters["properties"]["equipmentRole"]
     assert equipment_role_schema["anyOf"][0]["enum"] == ["camera", "tripod"]
     assert model.requests[0].tool_choice == "resolve_agent_action"
+
+
+async def test_resolver_keeps_approximate_price_as_target() -> None:
+    model = FakeModel(
+        {
+            "action": "product_search",
+            "equipmentRole": "laptop",
+            "targetDailyRate": "150",
+        }
+    )
+
+    result = await AgentActionResolver(("laptop",)).resolve(
+        message="我想租每天 150 元左右的电脑",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+    )
+
+    assert result.action is not None
+    assert result.action.target_daily_rate == 150
+    assert result.action.max_daily_rate is None
+
+
+def test_price_intent_corrects_model_output_for_approximate_daily_price() -> None:
+    action = normalize_price_intent(
+        "我想租每天 150 元左右的电脑",
+        AgentAction(action="product_search", max_daily_rate="150"),
+    )
+
+    assert action.target_daily_rate == 150
+    assert action.max_daily_rate is None
+
+
+def test_price_intent_keeps_explicit_upper_limit_as_hard_filter() -> None:
+    action = normalize_price_intent(
+        "日租不超过 150 元",
+        AgentAction(action="product_search", target_daily_rate="150"),
+    )
+
+    assert action.max_daily_rate == 150
+    assert action.target_daily_rate is None
 
 
 async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:
@@ -206,6 +251,7 @@ def test_pending_search_merges_only_missing_followup_fields() -> None:
         keyword_specificity="specific",
         equipment_role="camera",
         max_daily_rate="500",
+        target_daily_rate="450",
         waiting_for_rental_period=True,
     )
 
@@ -213,6 +259,7 @@ def test_pending_search_merges_only_missing_followup_fields() -> None:
         AgentAction(
             action="product_search",
             max_daily_rate="600",
+            target_daily_rate="550",
             continues_pending=True,
         )
     )
@@ -221,6 +268,7 @@ def test_pending_search_merges_only_missing_followup_fields() -> None:
     assert merged.keyword_specificity == "specific"
     assert merged.equipment_role == "camera"
     assert str(merged.max_daily_rate) == "600"
+    assert str(merged.target_daily_rate) == "550"
     assert merged.continues_pending is True
 
 

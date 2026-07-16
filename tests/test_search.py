@@ -49,6 +49,18 @@ def test_specific_model_keyword_is_preserved() -> None:
     assert plan.brand == "Apple"
 
 
+def test_target_daily_rate_is_preserved_for_server_side_ranking() -> None:
+    plan = ProductSearchPlanner().plan(
+        AgentAction(
+            action="product_search",
+            equipment_role="laptop",
+            target_daily_rate="150",
+        )
+    )
+
+    assert plan.target_daily_rate == 150
+
+
 @pytest.mark.parametrize("field", ("brand", "model"))
 def test_catalog_exact_filters_match_rentflow_column_limit(field: str) -> None:
     with pytest.raises(ValidationError):

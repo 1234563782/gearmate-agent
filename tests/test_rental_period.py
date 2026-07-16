@@ -10,6 +10,7 @@ from gearmate.rental_period import (
     InvalidRentalPeriod,
     RentalPeriodPolicy,
     RentalPeriodResolver,
+    has_explicit_time_range,
     has_temporal_signal,
 )
 from gearmate.tools.contracts import RentalPeriodInput
@@ -81,6 +82,7 @@ async def test_resolver_accepts_complete_period_in_user_timezone() -> None:
     assert result.clarification is None
     assert "用户当地时间: 2026-07-15T10:30:00+08:00" in (model.requests[0].messages[0].content)
     assert model.requests[0].enable_thinking is False
+    assert model.requests[0].tool_choice == "set_rental_period"
 
 
 async def test_resolver_returns_clarification_for_ambiguous_period() -> None:
@@ -132,6 +134,13 @@ def test_temporal_signal_detection() -> None:
     assert has_temporal_signal("我想租三天")
     assert has_temporal_signal("大概用两小时")
     assert not has_temporal_signal("有哪些佳能相机？")
+
+
+def test_explicit_time_range_detection_requires_two_clock_times() -> None:
+    assert has_explicit_time_range("7 月 20 日上午 10 点到 7 月 21 日下午 6 点")
+    assert has_explicit_time_range("从今天下午六点到明天下午六点")
+    assert has_explicit_time_range("2026-07-20 10:00 至 2026-07-21 18:00")
+    assert not has_explicit_time_range("7 月 20 日下午租相机")
 
 
 def test_policy_accepts_90_day_boundary_and_rejects_after_it() -> None:
