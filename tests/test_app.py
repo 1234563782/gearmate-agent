@@ -1,15 +1,26 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from gearmate.app import (
+    build_rentflow_http,
     catalog_sync_loop,
     conversation_cleanup_loop,
     delete_expired_conversations,
 )
 from gearmate.config import Settings
+
+
+def test_rentflow_http_client_bypasses_environment_proxy() -> None:
+    settings = Settings(_env_file=None, rentflow_base_url="http://localhost:8080")
+
+    with patch("gearmate.app.httpx.AsyncClient") as client:
+        build_rentflow_http(settings)
+
+    assert client.call_args.kwargs["base_url"] == "http://localhost:8080"
+    assert client.call_args.kwargs["trust_env"] is False
 
 
 @pytest.mark.asyncio

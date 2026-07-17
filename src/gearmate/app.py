@@ -22,6 +22,21 @@ from gearmate.rentflow.client import RentFlowClient
 logger = logging.getLogger(__name__)
 
 
+def build_rentflow_http(settings: Settings) -> httpx.AsyncClient:
+    timeout = httpx.Timeout(
+        connect=settings.rentflow_connect_timeout_seconds,
+        read=settings.rentflow_read_timeout_seconds,
+        write=settings.rentflow_read_timeout_seconds,
+        pool=settings.rentflow_connect_timeout_seconds,
+    )
+    return httpx.AsyncClient(
+        base_url=settings.rentflow_base_url.rstrip("/"),
+        timeout=timeout,
+        headers={"Accept": "application/json"},
+        trust_env=False,
+    )
+
+
 async def catalog_sync_loop(
     catalog_search: CatalogSearchService,
     rentflow: RentFlowClient,
@@ -90,17 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             conversation_cleanup_loop(repository, resolved_settings),
             name="gearmate-conversation-cleanup",
         )
-        timeout = httpx.Timeout(
-            connect=resolved_settings.rentflow_connect_timeout_seconds,
-            read=resolved_settings.rentflow_read_timeout_seconds,
-            write=resolved_settings.rentflow_read_timeout_seconds,
-            pool=resolved_settings.rentflow_connect_timeout_seconds,
-        )
-        rentflow_http = httpx.AsyncClient(
-            base_url=resolved_settings.rentflow_base_url.rstrip("/"),
-            timeout=timeout,
-            headers={"Accept": "application/json"},
-        )
+        rentflow_http = build_rentflow_http(resolved_settings)
         embedding_model = build_embedding_model(resolved_settings)
         catalog_search = None
         catalog_sync_task: asyncio.Task[None] | None = None
