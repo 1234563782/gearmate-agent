@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -156,6 +156,49 @@ class QuoteResult(ToolModel):
     end_at: datetime
     expires_at: datetime
     price_snapshot: PriceSnapshot
+
+
+OrderStatus = Literal[
+    "PENDING_CONFIRMATION",
+    "CONFIRMED",
+    "RECEIVED",
+    "CANCELLED",
+    "EXPIRED",
+]
+
+
+class OrderListInput(ToolModel):
+    status: OrderStatus | None = None
+    page: int = Field(default=0, ge=0)
+    size: int = Field(default=5, ge=1, le=20)
+
+
+class OrderSummary(ToolModel):
+    order_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_reservation_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    product_name: str
+    product_model: str
+    equipment_display_code: str | None
+    status: OrderStatus
+    effective_status: OrderStatus
+    start_at: datetime
+    end_at: datetime
+    expires_at: datetime
+    price_snapshot: PriceSnapshot
+    created_at: datetime
+    confirmed_at: datetime | None
+    received_at: datetime | None
+    cancelled_at: datetime | None
+    expired_at: datetime | None
+
+
+class OrderPage(ToolModel):
+    items: tuple[OrderSummary, ...]
+    page: int = Field(ge=0)
+    size: int = Field(ge=1)
+    total_elements: int = Field(ge=0)
+    total_pages: int = Field(ge=0)
 
 
 class CatalogSearchTool(Protocol):

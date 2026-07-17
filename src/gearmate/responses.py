@@ -1,5 +1,8 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from gearmate.actions import AgentAction
-from gearmate.tools.contracts import RentalPeriodInput
+from gearmate.tools.contracts import OrderStatus, RentalPeriodInput
 from gearmate.validation.facts import FactSnapshot
 
 
@@ -10,6 +13,7 @@ class UserResponseComposer:
         action: AgentAction,
         facts: FactSnapshot,
         rental_period: RentalPeriodInput | None,
+        timezone: str = "Asia/Shanghai",
     ) -> str:
         if facts.scenario_kits:
             return self._scenario(facts)
@@ -21,6 +25,8 @@ class UserResponseComposer:
             return self._availability(facts)
         if action.action == "quote":
             return self._quote(facts)
+        if action.action == "order_list":
+            return self._orders(facts, timezone)
         return facts.fallback_text()
 
     def _product_search(
@@ -120,3 +126,44 @@ class UserResponseComposer:
         if not kit.availability_checked:
             lines.append("补充完整租期后，我会继续核验整套设备的实时库存。")
         return "\n".join(lines)
+
+    @classmethod
+    def _orders(cls, facts: FactSnapshot, timezone: str) -> str:
+        orders = list(facts.orders.values())
+        if not orders:
+            return (
+                "当前筛选条件下没有订单。"
+                if facts.order_list_performed
+                else "暂时无法取得订单。"
+            )
+
+        lines = ["这是你最近的订单："]
+        for order in orders:
+            status = cls._order_status_label(order.effective_status)
+            period = (
+                f"{cls._local_time(order.start_at, timezone)} 至 "
+                f"{cls._local_time(order.end_at, timezone)}"
+            )
+            lines.append(
+                f"- {order.product_name}（{order.product_model}）：{status}，"
+                f"租期 {period}，合计 ¥{order.price_snapshot.total_amount}。"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _order_status_label(status: OrderStatus) -> str:
+        return {
+            "PENDING_CONFIRMATION": "待确认",
+            "CONFIRMED": "已确认",
+            "RECEIVED": "已收货",
+            "CANCELLED": "已取消",
+            "EXPIRED": "已过期",
+        }[status]
+
+    @staticmethod
+    def _local_time(value: datetime, timezone: str) -> str:
+        try:
+            local_timezone = ZoneInfo(timezone)
+        except ZoneInfoNotFoundError:
+            local_timezone = ZoneInfo("UTC")
+        return value.astimezone(local_timezone).strftime("%Y-%m-%d %H:%M")

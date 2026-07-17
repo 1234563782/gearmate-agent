@@ -61,6 +61,7 @@ class GearMateAgent:
         scenario_plan: ScenarioPlan | None,
         action: AgentAction,
         write_event: EventWriter,
+        timezone: str = "Asia/Shanghai",
     ) -> AgentResult:
         facts = FactSnapshot()
         if action.max_daily_rate is not None:
@@ -74,6 +75,7 @@ class GearMateAgent:
                 action=action,
                 facts=facts,
                 rental_period=rental_period,
+                timezone=timezone,
             )
         if scenario_plan is not None and scenario_plan.requirements.daily_budget is not None:
             facts.add_constraint_amount(scenario_plan.requirements.daily_budget)
@@ -199,6 +201,20 @@ class GearMateAgent:
                         "startAt": rental_period.start_at.isoformat(),
                         "endAt": rental_period.end_at.isoformat(),
                     },
+                )
+            )
+        elif action.action == "order_list":
+            arguments = {
+                "page": 0,
+                "size": max(1, min(5, self._settings.max_tool_result_items)),
+            }
+            if action.order_status is not None:
+                arguments["status"] = action.order_status
+            automatic_tool_calls.append(
+                ModelToolCall(
+                    id=AUTOMATIC_ACTION_CALL_ID,
+                    name="list_orders",
+                    arguments=arguments,
                 )
             )
         if automatic_tool_calls and not any(item.tool_calls for item in messages[-1:]):

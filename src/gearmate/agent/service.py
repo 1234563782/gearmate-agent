@@ -346,6 +346,7 @@ class RunCoordinator:
                     scenario_plan=scenario_plan,
                     action=action,
                     write_event=write_event,
+                    timezone=context.timezone,
                 )
             if tools.last_search_diagnostics is not None:
                 await write_event("search.retrieval", tools.last_search_diagnostics)

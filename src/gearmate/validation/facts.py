@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 from gearmate.tools.contracts import (
     AvailabilityResult,
+    OrderPage,
+    OrderSummary,
     ProductDetail,
     ProductSearchResult,
     ProductSummary,
@@ -34,7 +36,9 @@ class FactSnapshot:
     availability: dict[str, AvailabilityResult] = field(default_factory=dict)
     quotes: dict[str, QuoteResult] = field(default_factory=dict)
     scenario_kits: list[ScenarioKitResult] = field(default_factory=list)
+    orders: dict[str, OrderSummary] = field(default_factory=dict)
     product_search_performed: bool = False
+    order_list_performed: bool = False
     constraint_amounts: set[Decimal] = field(default_factory=set)
     constraint_counts: set[int] = field(default_factory=set)
 
@@ -68,6 +72,9 @@ class FactSnapshot:
         elif isinstance(result, ScenarioKitResult):
             self.scenario_kits.append(result)
             self.products.update((item.product.product_id, item.product) for item in result.items)
+        elif isinstance(result, OrderPage):
+            self.order_list_performed = True
+            self.orders.update((item.order_id, item) for item in result.items)
         else:
             raise TypeError(f"Unsupported fact result: {type(result).__name__}")
 
@@ -159,12 +166,19 @@ class FactSnapshot:
                 f"- 正式报价：租金 {snapshot.rental_amount} 元，"
                 f"押金 {snapshot.deposit_amount} 元，总计 {snapshot.total_amount} 元"
             )
+        for order in self.orders.values():
+            lines.append(
+                f"- {order.product_name}：状态 {order.effective_status}，"
+                f"合计 {order.price_snapshot.total_amount} 元"
+            )
         if not lines:
             if self.product_search_performed:
                 return (
                     "当前没有找到符合这些搜索条件的商品。"
                     "你可以调整商品类型、预算或租期后重试。"
                 )
+            if self.order_list_performed:
+                return "当前筛选条件下没有订单。"
             return "暂时没有取得可核验的商品、库存或报价信息，请补充商品和租期后重试。"
         return "我查到的结果如下：\n" + "\n".join(lines)
 
@@ -188,6 +202,17 @@ class FactSnapshot:
             values.add(self._money_value(kit.total_daily_rate))
             values.add(self._money_value(kit.max_daily_budget))
             values.update(self._money_value(item.subtotal_daily_rate) for item in kit.items)
+        for order in self.orders.values():
+            snapshot = order.price_snapshot
+            values.update(
+                self._money_value(value)
+                for value in (
+                    snapshot.daily_rate,
+                    snapshot.rental_amount,
+                    snapshot.deposit_amount,
+                    snapshot.total_amount,
+                )
+            )
         return values
 
     @staticmethod

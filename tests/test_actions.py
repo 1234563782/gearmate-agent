@@ -145,6 +145,32 @@ async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:
     assert "must not turn thanks" in model.requests[0].messages[0].content
 
 
+async def test_resolver_returns_filtered_order_list_action() -> None:
+    model = FakeModel(
+        {
+            "action": "order_list",
+            "orderStatus": "CONFIRMED",
+        }
+    )
+
+    result = await AgentActionResolver(("camera",)).resolve(
+        message="查看我的已确认订单",
+        history=(),
+        current_scenario_id=None,
+        pending_product_search=None,
+        pending_rental_action=None,
+        model=model,
+        max_output_tokens=128,
+    )
+
+    assert result.action is not None
+    assert result.action.action == "order_list"
+    assert result.action.order_status == "CONFIRMED"
+    prompt = model.requests[0].messages[0].content
+    assert "current signed-in user's orders" in prompt
+    assert "Never request or invent a user ID" in prompt
+
+
 async def test_resolver_receives_database_catalog_aliases() -> None:
     model = FakeModel(
         {

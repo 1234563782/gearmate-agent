@@ -6,6 +6,8 @@ from gearmate.tools.contracts import (
     AvailabilityInput,
     AvailabilityResult,
     CatalogUseCase,
+    OrderListInput,
+    OrderPage,
     ProductDetail,
     ProductSearchInput,
     ProductSearchResult,
@@ -69,6 +71,22 @@ class RentFlowClient:
             headers={"Authorization": f"Bearer {self._access_token}"},
         )
         return QuoteResult.model_validate(self._payload(response))
+
+    async def list_orders(self, request: OrderListInput) -> OrderPage:
+        response = await self._client.get(
+            "/api/v1/orders",
+            params={
+                key: value
+                for key, value in {
+                    "status": request.status,
+                    "page": request.page,
+                    "size": request.size,
+                }.items()
+                if value is not None
+            },
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+        return OrderPage.model_validate(self._payload(response))
 
     @staticmethod
     def _payload(response: httpx.Response) -> Any:

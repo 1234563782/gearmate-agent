@@ -347,8 +347,8 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
                         id="period-confirmed",
                         name="set_rental_period",
                         arguments={
-                                "startAt": "2026-07-17T14:00:00+08:00",
-                                "endAt": "2026-07-18T14:00:00+08:00",
+                                "startAt": "2026-07-20T14:00:00+08:00",
+                                "endAt": "2026-07-21T14:00:00+08:00",
                         },
                     ),
                 ),
@@ -766,6 +766,7 @@ async def test_changed_product_category_does_not_inherit_pending_use_case() -> N
             "productPosition": None,
             "maxDailyRate": None,
             "targetDailyRate": None,
+            "orderStatus": None,
             "continuesPending": False,
         }
     ]

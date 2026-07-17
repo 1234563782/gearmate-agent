@@ -15,6 +15,7 @@ from gearmate.llm.types import (
     ModelToolDefinition,
     ModelUsage,
 )
+from gearmate.tools.contracts import OrderStatus
 
 ACTION_RESOLVER_TOOL_NAME = "resolve_agent_action"
 PRICE_AMOUNT = r"(?P<amount>\d+(?:\.\d{1,2})?)"
@@ -41,6 +42,7 @@ AgentActionName = Literal[
     "product_detail",
     "availability",
     "quote",
+    "order_list",
     "scenario_continue",
 ]
 PendingRentalActionName = Literal["availability", "quote"]
@@ -68,6 +70,7 @@ class AgentAction(BaseModel):
     product_position: int | None = Field(default=None, ge=1, le=100)
     max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
     target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
+    order_status: OrderStatus | None = None
     continues_pending: bool = False
 
 
@@ -300,6 +303,9 @@ Choose one action based on meaning, in any user language:
   is explicit in the current turn. Use productPosition for ordinal references.
 - quote: explicitly request a formal quote for one exact product. Include productId under the same
   rule and productPosition for ordinal references. General price discovery is product_search.
+- order_list: view or list the current signed-in user's orders. Use orderStatus only when the user
+  explicitly asks for pending confirmation, confirmed, received, cancelled, or expired orders.
+  Never request or invent a user ID, and never expose internal order or reservation IDs.
 - scenario_continue: start a multi-item use-case plan, explicitly continue the saved scenario, or
   answer/change requirements for that scenario.
 
@@ -309,8 +315,8 @@ corrects an outstanding clarification for Current pending product search. When i
 only fields explicitly changed by this turn; the server will retain the other saved fields. Date,
 time, duration, or confirmation answers to Current pending availability or quote action must use
 that saved action and set continuesPending=true without inventing a new product ID. A new search or
-new availability/quote request must set continuesPending=false. Never invent IDs or fill missing
-parameters."""
+new availability/quote request or an order query must set continuesPending=false. Never invent IDs
+or fill missing parameters."""
 
 
 class AgentActionResolver:

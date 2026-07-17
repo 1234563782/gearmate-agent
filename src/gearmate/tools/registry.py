@@ -17,6 +17,8 @@ from gearmate.requirements import EquipmentNeed, EquipmentRole, ScenarioPlan
 from gearmate.tools.contracts import (
     AvailabilityInput,
     AvailabilityResult,
+    OrderListInput,
+    OrderPage,
     ProductDetailInput,
     ProductSearchInput,
     ProductSearchResult,
@@ -100,6 +102,16 @@ class ToolRegistry:
                 read_only=False,
                 concurrency_safe=False,
                 timeout_seconds=timeout_seconds,
+            ),
+            "list_orders": ToolDescriptor(
+                name="list_orders",
+                description="查询当前登录用户的订单，可按订单状态筛选；不得查询其他用户。",
+                input_model=OrderListInput,
+                handler=self._list_orders,
+                read_only=True,
+                concurrency_safe=True,
+                timeout_seconds=timeout_seconds,
+                max_result_items=max_result_items,
             ),
         }
         if (
@@ -360,6 +372,9 @@ class ToolRegistry:
         )
         self._last_product_search_result = filtered_result
         return filtered_result
+
+    async def _list_orders(self, request: OrderListInput) -> OrderPage:
+        return await self._rentflow.list_orders(request)
 
     @staticmethod
     def _apply_price_preference(
