@@ -55,6 +55,7 @@ class OpenAICompatibleChatModel:
             base_url=config.base_url,
             api_key=config.api_key.get_secret_value(),
             timeout=timeout,
+            max_retries=0,
         )
 
     @property

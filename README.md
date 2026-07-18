@@ -192,8 +192,24 @@ GEARMATE_CATALOG_SYNC_ON_STARTUP=true
 | `GEARMATE_CONVERSATION_RETENTION_HOURS` | `24` | 非活跃会话保留时间 |
 | `GEARMATE_SSE_HEARTBEAT_SECONDS` | `15` | SSE 心跳间隔 |
 | `GEARMATE_CATALOG_SYNC_INTERVAL_SECONDS` | `900` | 语义目录正常同步间隔 |
+| `GEARMATE_CHAT_MODEL_MAX_CONCURRENCY` | `6` | 单进程聊天模型总并发上限 |
+| `GEARMATE_ACTION_MODEL_MAX_CONCURRENCY` | `4` | 动作、租期和需求解析并发上限 |
+| `GEARMATE_MAIN_MODEL_MAX_CONCURRENCY` | `3` | 主回答生成并发上限 |
+| `GEARMATE_BACKGROUND_MODEL_MAX_CONCURRENCY` | `1` | 会话摘要并发上限 |
+| `GEARMATE_CHAT_QUEUE_CAPACITY` | `40` | 聊天模型有界等待队列容量 |
+| `GEARMATE_EMBEDDING_MAX_CONCURRENCY` | `2` | 单进程 Embedding 总并发上限 |
+| `GEARMATE_EMBEDDING_ONLINE_MAX_CONCURRENCY` | `2` | 在线语义查询并发上限 |
+| `GEARMATE_EMBEDDING_REFRESH_MAX_CONCURRENCY` | `1` | 目录刷新 Embedding 并发上限 |
 
 完整配置及默认值见 `.env.example` 和 `src/gearmate/config.py`。
+
+聊天模型和 Embedding 模型使用相互独立的有界队列、并发信号量、RPM/TPM
+令牌桶、指数退避和断路器。动作解析、主回答、后台摘要以及在线查询、目录刷新分别使用
+独立 workload lane，避免目录刷新或摘要任务占满在线请求容量。OpenAI SDK 自带重试已关闭，
+由统一治理层处理 `429`、连接/超时和 `5xx`，并遵循服务端 `Retry-After`。
+
+这些限制在单个 GearMate 进程内生效。当前单实例部署不需要 Redis；扩展为多个 GearMate
+实例时，应将全局 RPM/TPM 配额和分布式并发租约迁移到 Redis，各实例仍保留本地有界队列与断路器。
 
 ## API 使用流程
 

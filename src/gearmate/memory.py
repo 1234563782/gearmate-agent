@@ -310,6 +310,7 @@ class ConversationMemoryService:
             ),
             max_output_tokens=self._settings.context_summary_max_output_tokens,
             temperature=0.0,
+            workload="background",
         )
         response = await model.complete(request)
         content = response.text.strip()

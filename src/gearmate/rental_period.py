@@ -157,6 +157,7 @@ class RentalPeriodResolver:
                 RESOLVER_TOOL_NAME if has_explicit_time_range(message) else "auto"
             ),
             enable_thinking=False,
+            workload="action",
         )
         response = await model.complete(request)
         for call in response.tool_calls:

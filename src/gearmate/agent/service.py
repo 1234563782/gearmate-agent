@@ -34,6 +34,11 @@ from gearmate.requirements import (
     ScenarioCatalog,
     ScenarioPlan,
 )
+from gearmate.resilience import (
+    ModelCircuitOpenError,
+    ModelQueueFullError,
+    ModelQueueTimeoutError,
+)
 from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
@@ -390,6 +395,7 @@ class RunCoordinator:
                             if tools.last_availability_result is not None
                             else None
                         ),
+                        tools.last_quote_result,
                     )
                     if exact_presentation is not None:
                         presentation_payload = exact_presentation.model_dump(
@@ -461,6 +467,12 @@ class RunCoordinator:
             await self._fail(run_id, "TIMEOUT", "RUN_TIMEOUT")
         except ModelConfigurationError:
             await self._fail(run_id, "MODEL_CONFIGURATION_ERROR", "MODEL_CONFIGURATION_ERROR")
+        except (ModelQueueFullError, ModelQueueTimeoutError) as error:
+            logger.warning("Model capacity unavailable (run_id=%s, code=%s)", run_id, error.code)
+            await self._fail(run_id, "MODEL_BUSY", error.code)
+        except ModelCircuitOpenError as error:
+            logger.warning("Model circuit open (run_id=%s)", run_id)
+            await self._fail(run_id, "MODEL_UNAVAILABLE", error.code)
         except asyncio.CancelledError:
             await self._fail(run_id, "CANCELLED", "RUN_CANCELLED", status="CANCELLED")
             raise

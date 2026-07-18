@@ -4,9 +4,11 @@ from gearmate.actions import AgentAction
 from gearmate.recommendations import RecommendationPlanner
 from gearmate.search import RecentProductReference
 from gearmate.tools.contracts import (
+    PriceSnapshot,
     ProductSearchResult,
     ProductSummary,
     ProductUseCase,
+    QuoteResult,
     RentalPeriodInput,
 )
 
@@ -128,6 +130,54 @@ def test_exact_result_keeps_period_and_live_availability() -> None:
     assert presentation.follow_up is None
     assert presentation.sections[0].products[0].available_count == 2
     assert presentation.closing == "点开卡片可以查看完整报价并继续预订。"
+
+
+def test_exact_quote_presentation_exposes_price_and_availability() -> None:
+    period = RentalPeriodInput(
+        start_at=datetime(2026, 7, 20, tzinfo=UTC),
+        end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+    )
+    quote = QuoteResult(
+        quote_id="01J00000000000000000000901",
+        product_id="01J00000000000000000000101",
+        start_at=period.start_at,
+        end_at=period.end_at,
+        expires_at=datetime(2026, 7, 18, 3, tzinfo=UTC),
+        price_snapshot=PriceSnapshot(
+            currency="CNY",
+            pricing_version=1,
+            pricing_rule="CEIL_24H_FIXED_DEPOSIT",
+            billing_days=2,
+            daily_rate="200.00",
+            rental_amount="400.00",
+            deposit_amount="3000.00",
+            total_amount="3400.00",
+            rounding_mode="HALF_UP",
+        ),
+    )
+
+    presentation = RecommendationPlanner().plan_exact(
+        RecentProductReference(
+            position=1,
+            product_id=quote.product_id,
+            name="Sony A7M4 相机机身",
+            brand="Sony",
+            model="A7M4",
+            equipment_role="camera",
+            daily_rate="200.00",
+            fixed_deposit="3000.00",
+        ),
+        period,
+        1,
+        quote,
+    )
+
+    assert presentation is not None
+    assert "正式报价已生成" in presentation.intro
+    assert "合计 ¥3400.00" in presentation.intro
+    assert "当前租期可租 1 台" in presentation.intro
+    assert presentation.sections[0].products[0].available_count == 1
+    assert presentation.closing == "报价有有效期，点开卡片可以继续预订。"
 
 
 def test_target_price_presentation_preserves_price_distance_order() -> None:

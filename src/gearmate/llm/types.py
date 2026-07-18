@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 ModelRole = Literal["system", "user", "assistant", "tool"]
+ModelWorkload = Literal["action", "main", "background"]
 
 
 class ModelToolCall(BaseModel):
@@ -40,6 +41,7 @@ class ModelRequest(BaseModel):
     tools: tuple[ModelToolDefinition, ...] = ()
     tool_choice: str = "auto"
     enable_thinking: bool | None = None
+    workload: ModelWorkload = "main"
 
 
 class ModelUsage(BaseModel):

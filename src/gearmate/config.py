@@ -39,12 +39,35 @@ class Settings(BaseSettings):
     model_first_token_timeout_seconds: float = 30.0
     model_request_timeout_seconds: float = 120.0
     model_max_output_tokens: int = 4096
+    chat_model_max_concurrency: int = 6
+    action_model_max_concurrency: int = 4
+    main_model_max_concurrency: int = 3
+    background_model_max_concurrency: int = 1
+    chat_queue_capacity: int = 40
+    chat_queue_timeout_seconds: float = 8.0
+    chat_requests_per_minute: int = 200
+    chat_tokens_per_minute: int = 500000
+    chat_max_retries: int = 2
+    chat_retry_base_delay_seconds: float = 0.5
+    chat_circuit_breaker_threshold: int = 5
+    chat_circuit_breaker_cooldown_seconds: float = 30.0
     semantic_search_enabled: bool = False
     embedding_base_url: str | None = None
     embedding_model_id: str | None = None
     embedding_api_key: SecretStr | None = None
     embedding_dimensions: int = 1024
     embedding_batch_size: int = 32
+    embedding_max_concurrency: int = 2
+    embedding_online_max_concurrency: int = 2
+    embedding_refresh_max_concurrency: int = 1
+    embedding_queue_capacity: int = 100
+    embedding_queue_timeout_seconds: float = 15.0
+    embedding_requests_per_minute: int = 300
+    embedding_tokens_per_minute: int = 1000000
+    embedding_max_retries: int = 3
+    embedding_retry_base_delay_seconds: float = 0.5
+    embedding_circuit_breaker_threshold: int = 5
+    embedding_circuit_breaker_cooldown_seconds: float = 60.0
     semantic_search_top_k: int = 20
     semantic_search_min_score: float = 0.65
     semantic_vector_weight: float = 0.85
@@ -101,6 +124,12 @@ class Settings(BaseSettings):
         "catalog_sync_retry_seconds",
         "conversation_retention_hours",
         "conversation_cleanup_interval_seconds",
+        "chat_queue_timeout_seconds",
+        "chat_retry_base_delay_seconds",
+        "chat_circuit_breaker_cooldown_seconds",
+        "embedding_queue_timeout_seconds",
+        "embedding_retry_base_delay_seconds",
+        "embedding_circuit_breaker_cooldown_seconds",
     )
     @classmethod
     def positive_timeout(cls, value: float) -> float:
@@ -143,12 +172,52 @@ class Settings(BaseSettings):
         "embedding_dimensions",
         "embedding_batch_size",
         "semantic_search_top_k",
+        "chat_model_max_concurrency",
+        "action_model_max_concurrency",
+        "main_model_max_concurrency",
+        "background_model_max_concurrency",
+        "chat_requests_per_minute",
+        "chat_tokens_per_minute",
+        "chat_circuit_breaker_threshold",
+        "embedding_max_concurrency",
+        "embedding_online_max_concurrency",
+        "embedding_refresh_max_concurrency",
+        "embedding_requests_per_minute",
+        "embedding_tokens_per_minute",
+        "embedding_circuit_breaker_threshold",
     )
     @classmethod
     def positive_limit(cls, value: int) -> int:
         if value < 1:
             raise ValueError("agent limits must be positive")
         return value
+
+    @field_validator(
+        "chat_queue_capacity",
+        "chat_max_retries",
+        "embedding_queue_capacity",
+        "embedding_max_retries",
+    )
+    @classmethod
+    def non_negative_limit(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("queue capacities and retry counts must not be negative")
+        return value
+
+    @model_validator(mode="after")
+    def workload_concurrency_does_not_exceed_total(self) -> "Settings":
+        if max(
+            self.action_model_max_concurrency,
+            self.main_model_max_concurrency,
+            self.background_model_max_concurrency,
+        ) > self.chat_model_max_concurrency:
+            raise ValueError("chat workload concurrency must not exceed total concurrency")
+        if max(
+            self.embedding_online_max_concurrency,
+            self.embedding_refresh_max_concurrency,
+        ) > self.embedding_max_concurrency:
+            raise ValueError("embedding workload concurrency must not exceed total concurrency")
+        return self
 
     @field_validator("embedding_dimensions")
     @classmethod

@@ -23,6 +23,8 @@ from gearmate.validation.facts import FactSnapshot
 EventWriter = Callable[[str, dict[str, Any]], Awaitable[None]]
 AUTOMATIC_SCENARIO_KIT_CALL_ID = "automatic-scenario-kit"
 AUTOMATIC_ACTION_CALL_ID = "automatic-action"
+AUTOMATIC_QUOTE_AVAILABILITY_CALL_ID = "automatic-quote-availability"
+AUTOMATIC_QUOTE_CALL_ID = "automatic-quote"
 
 
 AgentState = GearMateGraphState
@@ -190,17 +192,32 @@ class GearMateAgent:
             and action.product_id is not None
             and rental_period is not None
         ):
+            arguments = {
+                "productId": action.product_id,
+                "startAt": rental_period.start_at.isoformat(),
+                "endAt": rental_period.end_at.isoformat(),
+            }
+            if action.action == "quote":
+                automatic_tool_calls.append(
+                    ModelToolCall(
+                        id=AUTOMATIC_QUOTE_AVAILABILITY_CALL_ID,
+                        name="check_availability",
+                        arguments=arguments,
+                    )
+                )
             automatic_tool_calls.append(
                 ModelToolCall(
-                    id=AUTOMATIC_ACTION_CALL_ID,
-                    name=(
-                        "check_availability" if action.action == "availability" else "create_quote"
+                    id=(
+                        AUTOMATIC_ACTION_CALL_ID
+                        if action.action == "availability"
+                        else AUTOMATIC_QUOTE_CALL_ID
                     ),
-                    arguments={
-                        "productId": action.product_id,
-                        "startAt": rental_period.start_at.isoformat(),
-                        "endAt": rental_period.end_at.isoformat(),
-                    },
+                    name=(
+                        "check_availability"
+                        if action.action == "availability"
+                        else "create_quote"
+                    ),
+                    arguments=arguments,
                 )
             )
         elif action.action == "order_list":
@@ -277,6 +294,7 @@ class GearMateAgent:
                 messages=tuple(state["messages"]),
                 tools=(() if action.action == "chat" else self._tools.model_definitions()),
                 max_output_tokens=self._settings.model_max_output_tokens,
+                workload="main",
             )
             async with asyncio.timeout(self._settings.model_request_timeout_seconds):
                 response = await self._model.complete(request)

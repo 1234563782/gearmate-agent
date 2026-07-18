@@ -6,6 +6,7 @@ from gearmate.actions import (
     merge_pending_product_search,
     merge_pending_rental_action,
     normalize_price_intent,
+    preserve_semantic_query_language,
 )
 from gearmate.catalog import CatalogAliasTerm, CatalogVocabulary
 from gearmate.llm.types import (
@@ -125,6 +126,18 @@ def test_new_search_without_price_drops_model_carried_price() -> None:
 
     assert action.max_daily_rate is None
     assert action.target_daily_rate is None
+
+
+def test_semantic_query_keeps_user_language_when_model_translates() -> None:
+    action = preserve_semantic_query_language(
+        "我想拍旅行 vlog，想要轻便、手持稳定的设备",
+        AgentAction(
+            action="product_search",
+            semantic_query="travel vlog, lightweight, handheld stable",
+        ),
+    )
+
+    assert action.semantic_query == "我想拍旅行 vlog，想要轻便、手持稳定的设备"
 
 
 async def test_resolver_keeps_thanks_as_chat_with_saved_scenario() -> None:

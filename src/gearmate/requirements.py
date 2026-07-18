@@ -357,6 +357,7 @@ class RentalRequirementsResolver:
             temperature=0.0,
             tool_choice=REQUIREMENTS_TOOL_NAME,
             enable_thinking=False,
+            workload="action",
         )
         response = await model.complete(request)
         for call in response.tool_calls:

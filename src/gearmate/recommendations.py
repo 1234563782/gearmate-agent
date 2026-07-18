@@ -6,7 +6,12 @@ from pydantic.alias_generators import to_camel
 
 from gearmate.actions import AgentAction
 from gearmate.search import RecentProductReference
-from gearmate.tools.contracts import ProductSearchResult, ProductUseCase, RentalPeriodInput
+from gearmate.tools.contracts import (
+    ProductSearchResult,
+    ProductUseCase,
+    QuoteResult,
+    RentalPeriodInput,
+)
 
 
 class RecommendationModel(BaseModel):
@@ -127,6 +132,7 @@ class RecommendationPlanner:
         product: RecentProductReference,
         rental_period: RentalPeriodInput,
         available_count: int | None,
+        quote: QuoteResult | None = None,
     ) -> RecommendationPresentation | None:
         if product.daily_rate is None or product.fixed_deposit is None:
             return None
@@ -140,12 +146,36 @@ class RecommendationPlanner:
             available_count=available_count,
             use_cases=product.use_cases,
         )
+        intro = "这个租期的实时库存已经核验，下面是你选中的设备。"
+        closing = "点开卡片可以查看完整报价并继续预订。"
+        if quote is not None:
+            price = quote.price_snapshot
+            availability = (
+                f"当前租期可租 {available_count} 台。"
+                if available_count is not None and available_count > 0
+                else (
+                    "当前租期暂无可租设备。"
+                    if available_count == 0
+                    else "库存数量暂未核验。"
+                )
+            )
+            intro = (
+                "正式报价已生成："
+                f"日租 ¥{price.daily_rate}，按 {price.billing_days} 个计费日计费；"
+                f"租金 ¥{price.rental_amount}，押金 ¥{price.deposit_amount}，"
+                f"合计 ¥{price.total_amount}。{availability}"
+            )
+            closing = (
+                "当前租期暂无库存，请调整租期后重新报价。"
+                if available_count == 0
+                else "报价有有效期，点开卡片可以继续预订。"
+            )
         return RecommendationPresentation(
             mode="recommend",
-            intro="这个租期的实时库存已经核验，下面是你选中的设备。",
+            intro=intro,
             sections=self._sections((card,), None),
             rental_period=rental_period,
-            closing="点开卡片可以查看完整报价并继续预订。",
+            closing=closing,
         )
 
     @staticmethod

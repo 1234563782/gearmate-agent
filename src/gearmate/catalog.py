@@ -329,7 +329,10 @@ class CatalogSearchService:
         )
         for offset in range(0, len(changed), self._batch_size):
             batch = changed[offset : offset + self._batch_size]
-            vectors = await self._embeddings.embed(tuple(item.search_text for item in batch))
+            vectors = await self._embeddings.embed(
+                tuple(item.search_text for item in batch),
+                workload="refresh",
+            )
             for document, embedding in zip(batch, vectors, strict=True):
                 await self._repository.upsert(
                     document,

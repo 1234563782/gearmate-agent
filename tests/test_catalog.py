@@ -20,7 +20,12 @@ class FakeEmbeddings:
     def __init__(self) -> None:
         self.requests: list[tuple[str, ...]] = []
 
-    async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
+    async def embed(
+        self,
+        texts: tuple[str, ...],
+        *,
+        workload: str = "online",
+    ) -> tuple[tuple[float, ...], ...]:
         self.requests.append(texts)
         return tuple((float(index + 1), 0.0) for index, _ in enumerate(texts))
 

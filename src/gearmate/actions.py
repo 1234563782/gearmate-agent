@@ -36,6 +36,7 @@ DAILY_PRICE = re.compile(
     rf"(?:每天|每日|一天|日租|每晚|per\s+day)[^\d]{{0,8}}{PRICE_AMOUNT}",
     re.IGNORECASE,
 )
+CJK_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 AgentActionName = Literal[
     "chat",
     "product_search",
@@ -223,6 +224,14 @@ def normalize_price_intent(message: str, action: AgentAction) -> AgentAction:
     )
 
 
+def preserve_semantic_query_language(message: str, action: AgentAction) -> AgentAction:
+    if action.action != "product_search" or not action.semantic_query:
+        return action
+    if CJK_CHARACTER.search(message) and not CJK_CHARACTER.search(action.semantic_query):
+        return action.model_copy(update={"semantic_query": message.strip()[:512]})
+    return action
+
+
 def action_resolver_system_prompt(
     current_scenario_id: str | None,
     pending_product_search: PendingProductSearch | None,
@@ -291,8 +300,10 @@ Choose one action based on meaning, in any user language:
   equipmentRole must not be returned as keyword. Set keywordSpecificity=specific only for a real
   model fragment or subtype that must additionally narrow the role; otherwise omit keyword.
   Put manufacturers in brand, exact product models in model, and purpose or use-case language in
-  semanticQuery. Examples: "computer" -> equipmentRole=laptop with no keyword; "Apple computer"
-  -> equipmentRole=laptop and brand=Apple with no keyword; "MacBook Pro 14" -> brand=Apple and
+  semanticQuery. semanticQuery must preserve the user's current language and original domain terms;
+  never translate it into another language. Examples: "computer" -> equipmentRole=laptop with no
+  keyword; "Apple computer" -> equipmentRole=laptop and brand=Apple with no keyword;
+  "MacBook Pro 14" -> brand=Apple and
   model=MacBook Pro 14; "computer for 4K editing" -> equipmentRole=laptop and semanticQuery set.
   Apply known catalog aliases exactly when the current user expression matches one. Alias mappings
   may provide more than one structured field for the same phrase.
@@ -388,6 +399,7 @@ class AgentActionResolver:
                 temperature=0.0,
                 tool_choice=ACTION_RESOLVER_TOOL_NAME,
                 enable_thinking=False,
+                workload="action",
             )
         )
         for call in response.tool_calls:
@@ -402,6 +414,7 @@ class AgentActionResolver:
                     usage=response.usage,
                 )
             action = normalize_price_intent(message, action)
+            action = preserve_semantic_query_language(message, action)
             if action.product_position is not None:
                 index = action.product_position - 1
                 if index >= len(recent_product_ids):

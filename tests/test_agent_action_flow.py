@@ -5,7 +5,14 @@ from gearmate.agent.graph import GearMateAgent
 from gearmate.config import Settings
 from gearmate.llm.types import ModelRequest, ModelResponse, ModelUsage
 from gearmate.prompts.loader import RenderedPrompt
-from gearmate.tools.contracts import ProductSearchResult, ProductSummary, RentalPeriodInput
+from gearmate.tools.contracts import (
+    AvailabilityResult,
+    PriceSnapshot,
+    ProductSearchResult,
+    ProductSummary,
+    QuoteResult,
+    RentalPeriodInput,
+)
 from gearmate.tools.registry import ToolExecutionResult
 
 
@@ -181,6 +188,86 @@ async def test_availability_without_product_id_clarifies_without_tools() -> None
     assert "点击卡片" in result.text
     assert "商品 ID" not in result.text
     assert tools.calls == []
+    assert model.requests == []
+
+
+class QuoteTools(FakeTools):
+    async def execute_all(self, calls, facts, write_event):
+        self.calls.extend(calls)
+        availability = AvailabilityResult(
+            product_id="01J00000000000000000000101",
+            start_at=datetime(2026, 7, 20, tzinfo=UTC),
+            end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+            available=True,
+            available_count=1,
+            checked_at=datetime(2026, 7, 18, tzinfo=UTC),
+        )
+        quote = QuoteResult(
+            quote_id="01J00000000000000000000901",
+            product_id=availability.product_id,
+            start_at=availability.start_at,
+            end_at=availability.end_at,
+            expires_at=datetime(2026, 7, 18, 1, tzinfo=UTC),
+            price_snapshot=PriceSnapshot(
+                currency="CNY",
+                pricing_version=1,
+                pricing_rule="CEIL_24H_FIXED_DEPOSIT",
+                billing_days=2,
+                daily_rate="200.00",
+                rental_amount="400.00",
+                deposit_amount="3000.00",
+                total_amount="3400.00",
+                rounding_mode="HALF_UP",
+            ),
+        )
+        facts.add(availability)
+        facts.add(quote)
+        return [
+            ToolExecutionResult(
+                call=calls[0],
+                content=availability.model_dump_json(by_alias=True),
+                is_error=False,
+                result=availability,
+            ),
+            ToolExecutionResult(
+                call=calls[1],
+                content=quote.model_dump_json(by_alias=True),
+                is_error=False,
+                result=quote,
+            ),
+        ]
+
+
+async def test_quote_checks_availability_before_generating_price() -> None:
+    model = FakeModel()
+    tools = QuoteTools()
+    period = RentalPeriodInput(
+        start_at=datetime(2026, 7, 20, tzinfo=UTC),
+        end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+    )
+
+    result = await GearMateAgent(
+        model,
+        tools,  # type: ignore[arg-type]
+        Settings(_env_file=None),
+        RenderedPrompt(version="test", content_hash="hash", content="system"),
+    ).run(
+        message="第一台，帮我算具体总价",
+        history=[],
+        rental_period=period,
+        scenario_plan=None,
+        action=AgentAction(
+            action="quote",
+            product_id="01J00000000000000000000101",
+            product_position=1,
+        ),
+        write_event=_ignore_event,
+    )
+
+    assert [call.name for call in tools.calls] == ["check_availability", "create_quote"]
+    assert tools.calls[0].arguments == tools.calls[1].arguments
+    assert result.tool_call_count == 2
+    assert "合计 ¥3400.00" in result.text
     assert model.requests == []
 
 
