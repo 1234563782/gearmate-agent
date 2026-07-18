@@ -307,15 +307,15 @@ class AgentRepository:
     ) -> None:
         statement = pg_insert(ConversationState).values(
             conversation_id=conversation_id,
-            rental_start_at=rental_period.start_at,
-            rental_end_at=rental_period.end_at,
+            rental_start_date=rental_period.start_date,
+            rental_end_date=rental_period.end_date,
             attributes={},
         )
         statement = statement.on_conflict_do_update(
             index_elements=[ConversationState.conversation_id],
             set_={
-                "rental_start_at": rental_period.start_at,
-                "rental_end_at": rental_period.end_at,
+                "rental_start_date": rental_period.start_date,
+                "rental_end_date": rental_period.end_date,
                 "updated_at": func.current_timestamp(),
             },
         )
@@ -328,8 +328,8 @@ class AgentRepository:
                 update(ConversationState)
                 .where(ConversationState.conversation_id == conversation_id)
                 .values(
-                    rental_start_at=None,
-                    rental_end_at=None,
+                    rental_start_date=None,
+                    rental_end_date=None,
                     updated_at=func.current_timestamp(),
                 )
             )
@@ -415,9 +415,7 @@ class AgentRepository:
         conversation_id: str,
         recent_search: RecentProductSearch,
     ) -> None:
-        attributes = {
-            "recentProductSearch": recent_search.model_dump(mode="json", by_alias=True)
-        }
+        attributes = {"recentProductSearch": recent_search.model_dump(mode="json", by_alias=True)}
         statement = pg_insert(ConversationState).values(
             conversation_id=conversation_id,
             attributes=attributes,
@@ -471,8 +469,8 @@ class AgentRepository:
             raw_pending_rental_action = state.attributes.get("pendingRentalAction")
             raw_recent_product_search = state.attributes.get("recentProductSearch")
             return ConversationStateMemory(
-                rental_start_at=state.rental_start_at,
-                rental_end_at=state.rental_end_at,
+                rental_start_date=state.rental_start_date,
+                rental_end_date=state.rental_end_date,
                 rental_requirements=(
                     RentalRequirements.model_validate(raw_requirements)
                     if raw_requirements is not None

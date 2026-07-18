@@ -41,8 +41,8 @@ class RentFlowClient:
             "size": request.size,
         }
         if request.rental_period is not None:
-            params["startAt"] = request.rental_period.start_at.isoformat()
-            params["endAt"] = request.rental_period.end_at.isoformat()
+            params["startDate"] = request.rental_period.start_date.isoformat()
+            params["endDate"] = request.rental_period.end_date.isoformat()
         response = await self._client.get(
             "/api/v1/products",
             params={key: value for key, value in params.items() if value is not None},

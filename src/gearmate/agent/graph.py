@@ -79,6 +79,7 @@ class GearMateAgent:
                 rental_period=rental_period,
                 timezone=timezone,
             )
+
         if scenario_plan is not None and scenario_plan.requirements.daily_budget is not None:
             facts.add_constraint_amount(scenario_plan.requirements.daily_budget)
             for need in scenario_plan.equipment_needs:
@@ -92,9 +93,9 @@ class GearMateAgent:
                 ModelMessage(
                     role="system",
                     content=(
-                        "本轮已确认租期："
-                        f"startAt={rental_period.start_at.isoformat()}, "
-                        f"endAt={rental_period.end_at.isoformat()}。"
+                        "本轮已确认租期（上海自然日，归还日期包含当天）："
+                        f"startDate={rental_period.start_date.isoformat()}, "
+                        f"endDate={rental_period.end_date.isoformat()}。"
                     ),
                 )
             )
@@ -194,8 +195,8 @@ class GearMateAgent:
         ):
             arguments = {
                 "productId": action.product_id,
-                "startAt": rental_period.start_at.isoformat(),
-                "endAt": rental_period.end_at.isoformat(),
+                "startDate": rental_period.start_date.isoformat(),
+                "endDate": rental_period.end_date.isoformat(),
             }
             if action.action == "quote":
                 automatic_tool_calls.append(
@@ -213,9 +214,7 @@ class GearMateAgent:
                         else AUTOMATIC_QUOTE_CALL_ID
                     ),
                     name=(
-                        "check_availability"
-                        if action.action == "availability"
-                        else "create_quote"
+                        "check_availability" if action.action == "availability" else "create_quote"
                     ),
                     arguments=arguments,
                 )
@@ -262,7 +261,10 @@ class GearMateAgent:
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
             if action.action in ("availability", "quote") and rental_period is None:
-                text = "请提供完整租期，包括开始时间、结束时间和时区，我再为你查询库存或生成报价。"
+                text = (
+                    "请提供完整租期，包括开始日期和归还日期；按上海自然日计算，"
+                    "最早可从后天起租，归还日期包含当天。"
+                )
                 await write_event(
                     "decision.made",
                     {"outcome": "NEED_CLARIFICATION", "field": "rentalPeriod"},

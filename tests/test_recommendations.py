@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from gearmate.actions import AgentAction
 from gearmate.recommendations import RecommendationPlanner
@@ -107,8 +107,8 @@ def test_selected_use_case_asks_only_for_missing_rental_period() -> None:
 
 def test_exact_result_keeps_period_and_live_availability() -> None:
     period = RentalPeriodInput(
-        start_at=datetime(2026, 7, 20, tzinfo=UTC),
-        end_at=datetime(2026, 7, 21, tzinfo=UTC),
+        start_date=date(2026, 7, 20),
+        end_date=date(2026, 7, 21),
     )
     presentation = RecommendationPlanner().plan_exact(
         RecentProductReference(
@@ -134,14 +134,14 @@ def test_exact_result_keeps_period_and_live_availability() -> None:
 
 def test_exact_quote_presentation_exposes_price_and_availability() -> None:
     period = RentalPeriodInput(
-        start_at=datetime(2026, 7, 20, tzinfo=UTC),
-        end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+        start_date=date(2026, 7, 20),
+        end_date=date(2026, 7, 21),
     )
     quote = QuoteResult(
         quote_id="01J00000000000000000000901",
         product_id="01J00000000000000000000101",
-        start_at=period.start_at,
-        end_at=period.end_at,
+        start_date=period.start_date,
+        end_date=period.end_date,
         expires_at=datetime(2026, 7, 18, 3, tzinfo=UTC),
         price_snapshot=PriceSnapshot(
             currency="CNY",

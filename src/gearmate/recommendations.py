@@ -116,7 +116,7 @@ class RecommendationPlanner:
         if rental_period is None:
             follow_up = FollowUpQuestion(
                 field="rental_period",
-                text="计划什么时候租用？",
+                text="请提供起止日期（最早从后天开始，结束日包含在租期内）。",
             )
         return RecommendationPresentation(
             mode="recommend",
@@ -153,15 +153,12 @@ class RecommendationPlanner:
             availability = (
                 f"当前租期可租 {available_count} 台。"
                 if available_count is not None and available_count > 0
-                else (
-                    "当前租期暂无可租设备。"
-                    if available_count == 0
-                    else "库存数量暂未核验。"
-                )
+                else ("当前租期暂无可租设备。" if available_count == 0 else "库存数量暂未核验。")
             )
             intro = (
                 "正式报价已生成："
-                f"日租 ¥{price.daily_rate}，按 {price.billing_days} 个计费日计费；"
+                f"日租 ¥{price.daily_rate}，按 {price.billing_days} 个自然日计费"
+                "（结束日包含在租期内）；"
                 f"租金 ¥{price.rental_amount}，押金 ¥{price.deposit_amount}，"
                 f"合计 ¥{price.total_amount}。{availability}"
             )
@@ -219,8 +216,7 @@ class RecommendationPlanner:
                 scores[(use_case.id, use_case.name)] += float(use_case.weight)
         ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0][0]))[:3]
         return tuple(
-            FollowUpOption(value=use_case_id, label=name)
-            for (use_case_id, name), _score in ranked
+            FollowUpOption(value=use_case_id, label=name) for (use_case_id, name), _score in ranked
         )
 
     @staticmethod
@@ -239,5 +235,11 @@ class RecommendationPlanner:
     @staticmethod
     def _closing(rental_period: RentalPeriodInput | None) -> str:
         if rental_period is not None:
-            return "这些设备已按你提供的租期核验库存，点开卡片可以查看报价并预订。"
-        return "可以先选择主要用途，也可以直接点开卡片填写租期并查询报价。"
+            return (
+                "这些设备已按你提供的起止日期核验库存，结束日包含在租期内；"
+                "点开卡片可以查看报价并继续预订。"
+            )
+        return (
+            "可以先选择主要用途，也可以直接点开卡片填写起止日期"
+            "（最早从后天开始，结束日包含在租期内）并查询报价。"
+        )

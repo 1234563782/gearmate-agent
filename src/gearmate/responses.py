@@ -1,6 +1,3 @@
-from datetime import datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
 from gearmate.actions import AgentAction
 from gearmate.tools.contracts import OrderStatus, RentalPeriodInput
 from gearmate.validation.facts import FactSnapshot
@@ -38,8 +35,7 @@ class UserResponseComposer:
         products = list(facts.products.values())
         if not products:
             return (
-                "暂时没有找到符合这些条件的设备。"
-                "可以放宽用途、价格或品牌要求，我再帮你重新筛选。"
+                "暂时没有找到符合这些条件的设备。可以放宽用途、价格或品牌要求，我再帮你重新筛选。"
             )
         if action.target_daily_rate is not None:
             intro = f"我按目标日租 ¥{action.target_daily_rate} 和你的使用需求筛选了这些设备："
@@ -60,9 +56,13 @@ class UserResponseComposer:
             lines.append(f"- {prefix} {product.name}：{detail}。")
 
         if rental_period is not None:
-            lines.append("我已经按你给出的租期核验库存，点开卡片即可查看完整报价并预订。")
+            lines.append(
+                "我已按你提供的起止日期核验库存，结束日也包含在租期内；点开卡片即可查看完整报价并继续预订。"
+            )
         else:
-            lines.append("目前显示的是日租参考价；选定租期后，我可以继续查询实时库存和总价。")
+            lines.append(
+                "目前显示的是日租参考价；请提供起止日期（最早从后天开始，结束日包含在租期内），我可以继续查询实时库存和总价。"
+            )
         return "\n".join(lines)
 
     @staticmethod
@@ -77,7 +77,9 @@ class UserResponseComposer:
         ]
         if reasons:
             lines.append(f"目录中标注的主要适用场景是：{reasons}。")
-        lines.append("告诉我具体租期后，我可以继续核验库存和完整报价。")
+        lines.append(
+            "请提供起止日期（最早从后天开始，结束日包含在租期内），我可以继续核验库存和完整报价。"
+        )
         return "\n".join(lines)
 
     @staticmethod
@@ -101,7 +103,8 @@ class UserResponseComposer:
         return "\n".join(
             (
                 "正式报价已经生成：",
-                f"- 日租 ¥{price.daily_rate}，计费 {price.billing_days} 天。",
+                f"- 日租 ¥{price.daily_rate}，计费 {price.billing_days} 个自然日"
+                "（结束日包含在租期内）。",
                 f"- 租金 ¥{price.rental_amount}，押金 ¥{price.deposit_amount}。",
                 f"- 合计 ¥{price.total_amount}。",
                 "报价有有效期，确认无误后可以继续预订。",
@@ -114,8 +117,7 @@ class UserResponseComposer:
         lines = ["我按完整场景需求组合了这套设备："]
         for item in kit.items:
             lines.append(
-                f"- {item.product.name} × {item.quantity}："
-                f"小计 ¥{item.subtotal_daily_rate}/天。"
+                f"- {item.product.name} × {item.quantity}：小计 ¥{item.subtotal_daily_rate}/天。"
             )
         lines.append(
             f"组合日租合计 ¥{kit.total_daily_rate}，预算 ¥{kit.max_daily_budget}，"
@@ -124,7 +126,9 @@ class UserResponseComposer:
         if kit.missing_roles:
             lines.append("当前目录还缺少部分必要设备，可以调整方案后重新组合。")
         if not kit.availability_checked:
-            lines.append("补充完整租期后，我会继续核验整套设备的实时库存。")
+            lines.append(
+                "补充起止日期后（最早从后天开始，结束日包含在租期内），我会继续核验整套设备的实时库存。"
+            )
         return "\n".join(lines)
 
     @classmethod
@@ -132,18 +136,13 @@ class UserResponseComposer:
         orders = list(facts.orders.values())
         if not orders:
             return (
-                "当前筛选条件下没有订单。"
-                if facts.order_list_performed
-                else "暂时无法取得订单。"
+                "当前筛选条件下没有订单。" if facts.order_list_performed else "暂时无法取得订单。"
             )
 
         lines = ["这是你最近的订单："]
         for order in orders:
             status = cls._order_status_label(order.effective_status)
-            period = (
-                f"{cls._local_time(order.start_at, timezone)} 至 "
-                f"{cls._local_time(order.end_at, timezone)}"
-            )
+            period = f"{order.start_date.isoformat()} 至 {order.end_date.isoformat()}（结束日包含）"
             lines.append(
                 f"- {order.product_name}（{order.product_model}）：{status}，"
                 f"租期 {period}，合计 ¥{order.price_snapshot.total_amount}。"
@@ -159,11 +158,3 @@ class UserResponseComposer:
             "CANCELLED": "已取消",
             "EXPIRED": "已过期",
         }[status]
-
-    @staticmethod
-    def _local_time(value: datetime, timezone: str) -> str:
-        try:
-            local_timezone = ZoneInfo(timezone)
-        except ZoneInfoNotFoundError:
-            local_timezone = ZoneInfo("UTC")
-        return value.astimezone(local_timezone).strftime("%Y-%m-%d %H:%M")

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Protocol
 
@@ -19,16 +19,18 @@ class ToolModel(BaseModel):
 
 
 class RentalPeriodInput(ToolModel):
-    start_at: datetime
-    end_at: datetime
+    start_date: date
+    end_date: date
 
     @model_validator(mode="after")
     def validate_period(self) -> "RentalPeriodInput":
-        if self.start_at.tzinfo is None or self.end_at.tzinfo is None:
-            raise ValueError("rental timestamps must include a timezone offset")
-        if self.start_at >= self.end_at:
-            raise ValueError("start_at must be before end_at")
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must not be before start_date")
         return self
+
+    @property
+    def billing_days(self) -> int:
+        return (self.end_date - self.start_date).days + 1
 
 
 class ProductSearchInput(ToolModel):
@@ -126,8 +128,8 @@ class AvailabilityInput(RentalPeriodInput):
 
 class AvailabilityResult(ToolModel):
     product_id: str
-    start_at: datetime
-    end_at: datetime
+    start_date: date
+    end_date: date
     available: bool
     available_count: int = Field(ge=0)
     checked_at: datetime
@@ -152,8 +154,8 @@ class PriceSnapshot(ToolModel):
 class QuoteResult(ToolModel):
     quote_id: str
     product_id: str
-    start_at: datetime
-    end_at: datetime
+    start_date: date
+    end_date: date
     expires_at: datetime
     price_snapshot: PriceSnapshot
 
@@ -182,8 +184,8 @@ class OrderSummary(ToolModel):
     equipment_display_code: str | None
     status: OrderStatus
     effective_status: OrderStatus
-    start_at: datetime
-    end_at: datetime
+    start_date: date
+    end_date: date
     expires_at: datetime
     price_snapshot: PriceSnapshot
     created_at: datetime

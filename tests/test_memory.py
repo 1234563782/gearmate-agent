@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from gearmate.actions import PendingProductSearch, PendingRentalAction
 from gearmate.config import Settings
@@ -153,8 +153,8 @@ def message(index: int, role: str, content: str) -> ConversationMessageMemory:
 
 async def test_build_context_recalls_period_and_keeps_newest_message() -> None:
     repository = FakeRepository()
-    start = datetime(2026, 7, 20, 9, tzinfo=UTC)
-    end = datetime(2026, 7, 22, 18, tzinfo=UTC)
+    start = date(2026, 7, 20)
+    end = date(2026, 7, 22)
     repository.state = ConversationStateMemory(start, end)
     repository.summary = ConversationSummaryMemory(
         content="用户计划公司直播。",
@@ -173,7 +173,7 @@ async def test_build_context_recalls_period_and_keeps_newest_message() -> None:
     now = datetime(2026, 7, 15, 2, 30, tzinfo=UTC)
     context = await service.build_context("conversation-1", now_utc=now)
 
-    assert context.rental_period == RentalPeriodInput(start_at=start, end_at=end)
+    assert context.rental_period == RentalPeriodInput(start_date=start, end_date=end)
     assert context.timezone == "Asia/Shanghai"
     assert context.now_utc == now
     assert context.now_local.isoformat() == "2026-07-15T10:30:00+08:00"
@@ -188,8 +188,8 @@ async def test_build_context_recalls_period_and_keeps_newest_message() -> None:
 async def test_remember_rental_period_delegates_to_repository() -> None:
     repository = FakeRepository()
     period = RentalPeriodInput(
-        start_at=datetime(2026, 8, 1, tzinfo=UTC),
-        end_at=datetime(2026, 8, 3, tzinfo=UTC),
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 3),
     )
     service = ConversationMemoryService(repository, settings())
 
@@ -206,8 +206,8 @@ async def test_invalid_period_is_not_written_to_memory() -> None:
     repository = FakeRepository()
     service = ConversationMemoryService(repository, settings())
     invalid = RentalPeriodInput(
-        start_at=datetime(2026, 10, 14, tzinfo=UTC),
-        end_at=datetime(2026, 10, 16, tzinfo=UTC),
+        start_date=date(2026, 10, 14),
+        end_date=date(2026, 10, 16),
     )
 
     try:
@@ -309,8 +309,8 @@ async def test_pending_rental_action_is_remembered_and_cleared() -> None:
 async def test_build_context_discards_and_clears_invalid_stored_period() -> None:
     repository = FakeRepository()
     repository.state = ConversationStateMemory(
-        datetime(2026, 10, 14, 9, tzinfo=UTC),
-        datetime(2026, 10, 15, 18, tzinfo=UTC),
+        date(2026, 10, 14),
+        date(2026, 10, 15),
     )
     service = ConversationMemoryService(repository, settings())
 

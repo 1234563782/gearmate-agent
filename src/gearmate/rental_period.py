@@ -6,36 +6,25 @@ from zoneinfo import ZoneInfo
 from pydantic import ValidationError
 
 from gearmate.llm.port import ChatModelPort
-from gearmate.llm.types import (
-    ModelMessage,
-    ModelRequest,
-    ModelToolDefinition,
-    ModelUsage,
-)
+from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolDefinition, ModelUsage
 from gearmate.tools.contracts import RentalPeriodInput
 
+BUSINESS_ZONE = ZoneInfo("Asia/Shanghai")
 TEMPORAL_SIGNAL = re.compile(
     r"(?:今天|明天|后天|大后天|本周|这周|下周|周末|星期[一二三四五六日天]?|"
-    r"周[一二三四五六日天]|月底|月初|早上|上午|中午|下午|晚上|凌晨|"
-    r"\d{4}\s*[年/-]\s*\d{1,2}|\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|"
-    r"\d{1,2}\s*[点时]|[零〇一二两三四五六七八九十百\d]+\s*(?:天|小时|周|个?月)|"
-    r"today|tomorrow|tonight|"
-    r"next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))",
+    r"周[一二三四五六日天]|月底|月初|\d{4}\s*[年/-]\s*\d{1,2}|"
+    r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|[零〇一二两三四五六七八九十百\d]+\s*(?:天|周|个?月)|"
+    r"today|tomorrow|next\s+(?:week|monday|tuesday|wednesday|thursday|friday|saturday|sunday))",
     re.IGNORECASE,
 )
-
-EXPLICIT_TIME_RANGE = re.compile(
-    r"(?:[零〇一二两三四五六七八九十百\d]{1,3}\s*(?:点|时)"
-    r"(?:\s*[零〇一二两三四五六七八九十百\d]{1,3}\s*分?)?.*?"
-    r"(?:到|至|~|—|\uff0d)\s*.*?"
-    r"[零〇一二两三四五六七八九十百\d]{1,3}\s*(?:点|时)"
-    r"(?:\s*[零〇一二两三四五六七八九十百\d]{1,3}\s*分?)?|"
-    r"\d{1,2}:\d{2}.*?(?:到|至|~|—|\uff0d)\s*.*?\d{1,2}:\d{2}|"
-    r"\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2}.*?"
-    r"(?:到|至|~|—|\uff0d).*?\d{4}-\d{1,2}-\d{1,2}T\d{1,2}:\d{2})",
+EXPLICIT_DATE_RANGE = re.compile(
+    r"(?:\d{4}\s*[年/-]\s*\d{1,2}\s*[月/-]\s*\d{1,2}\s*[日号]?|"
+    r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|今天|明天|后天|大后天).*?"
+    r"(?:到|至|~|—|-).*?"
+    r"(?:\d{4}\s*[年/-]\s*\d{1,2}\s*[月/-]\s*\d{1,2}\s*[日号]?|"
+    r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]?|今天|明天|后天|大后天)",
     re.IGNORECASE,
 )
-
 RESOLVER_TOOL_NAME = "set_rental_period"
 
 
@@ -51,8 +40,9 @@ class InvalidRentalPeriod(ValueError):
 
 
 class RentalPeriodPolicy:
-    def __init__(self, max_advance_days: int) -> None:
+    def __init__(self, max_advance_days: int, max_rental_days: int = 30) -> None:
         self._max_advance_days = max_advance_days
+        self._max_rental_days = max_rental_days
 
     @property
     def max_advance_days(self) -> int:
@@ -67,14 +57,17 @@ class RentalPeriodPolicy:
         reference = now_utc or datetime.now(UTC)
         if reference.tzinfo is None:
             reference = reference.replace(tzinfo=UTC)
-        reference = reference.astimezone(UTC)
-        start_at = rental_period.start_at.astimezone(UTC)
-        if start_at <= reference:
-            raise InvalidRentalPeriod("租赁开始时间必须晚于当前时间，请重新确认。")
-        latest_start = reference + timedelta(days=self._max_advance_days)
-        if start_at > latest_start:
+        today = reference.astimezone(BUSINESS_ZONE).date()
+        earliest_start = today + timedelta(days=2)
+        if rental_period.start_date < earliest_start:
+            raise InvalidRentalPeriod("租赁开始日期最早为后天（按北京时间），请重新确认。")
+        if rental_period.start_date > today + timedelta(days=self._max_advance_days):
             raise InvalidRentalPeriod(
-                f"租赁开始时间不能超过未来 {self._max_advance_days} 天，请重新确认。"
+                f"租赁开始日期不能超过未来 {self._max_advance_days} 天，请重新确认。"
+            )
+        if rental_period.billing_days > self._max_rental_days:
+            raise InvalidRentalPeriod(
+                f"租期最多为 {self._max_rental_days} 个自然日（归还日期包含当天），请重新确认。"
             )
         return rental_period
 
@@ -83,8 +76,12 @@ def has_temporal_signal(message: str) -> bool:
     return TEMPORAL_SIGNAL.search(message) is not None
 
 
+def has_explicit_date_range(message: str) -> bool:
+    return EXPLICIT_DATE_RANGE.search(message) is not None
+
+
 def has_explicit_time_range(message: str) -> bool:
-    return EXPLICIT_TIME_RANGE.search(message) is not None
+    return has_explicit_date_range(message)
 
 
 def resolver_system_prompt(
@@ -93,20 +90,22 @@ def resolver_system_prompt(
     now_local: datetime,
     max_advance_days: int,
 ) -> str:
-    return f"""你只负责从租赁对话中解析明确的开始时间和结束时间。
+    business_now = now_utc.astimezone(BUSINESS_ZONE)
+    return f"""你只负责从租赁对话中解析明确的开始日期和归还日期。
 可信 UTC 时间: {now_utc.isoformat()}
+上海租赁日历当前日期: {business_now.date().isoformat()}
 用户时区: {timezone}
 用户当地时间: {now_local.isoformat()}
 
 规则:
-1. 相对日期必须以上述用户当地时间为基准。
-2. 只有开始日期、开始时间、结束日期、结束时间都能唯一确定时, 才调用 {RESOLVER_TOOL_NAME};
-   一旦四项都明确, 必须调用工具, 不要再用文字重复确认。
-3. 输出时间必须包含用户时区对应的 UTC offset。
-4. "上午"、"下午"、"晚上"、"周末"等没有具体时分的表达不算完整。
-5. 信息不完整或有多种解释时不要调用工具, 只返回一个简洁的中文确认问题。
-6. 不要搜索商品、查询库存、计算价格或回答其他问题。
-7. 租赁开始时间不得超过当前时间之后 {max_advance_days} 天。"""
+1. 租赁只按自然日计算，业务日历固定为 Asia/Shanghai；不要输出时分秒或 UTC offset。
+2. 输出必须是 YYYY-MM-DD 格式的 startDate 和 endDate；归还日期包含在租期内。
+3. 相对日期必须以上述上海租赁日历当前日期为基准。
+4. 只有开始日期和归还日期都能唯一确定时，才调用 {RESOLVER_TOOL_NAME}；
+   一旦两项都明确，必须调用工具，不要再用文字重复确认。
+5. 开始日期最早为上海日期的后天，且不得超过未来 {max_advance_days} 天；单日租赁有效。
+6. 信息不完整或有多种解释时不要调用工具，只返回一个简洁的中文确认问题。
+7. 不要搜索商品、查询库存、计算价格或回答其他问题。"""
 
 
 class RentalPeriodResolver:
@@ -136,10 +135,7 @@ class RentalPeriodResolver:
                 ModelMessage(
                     role="system",
                     content=resolver_system_prompt(
-                        timezone,
-                        now_utc,
-                        now_local,
-                        self._policy.max_advance_days,
+                        timezone, now_utc, now_local, self._policy.max_advance_days
                     ),
                 ),
                 *recent_history,
@@ -147,15 +143,13 @@ class RentalPeriodResolver:
             tools=(
                 ModelToolDefinition(
                     name=RESOLVER_TOOL_NAME,
-                    description="保存用户已经明确确认的租赁开始和结束时间。",
+                    description="保存用户已经明确确认的租赁开始日期和归还日期。",
                     parameters=RentalPeriodInput.model_json_schema(by_alias=True),
                 ),
             ),
             max_output_tokens=max_output_tokens,
             temperature=0.0,
-            tool_choice=(
-                RESOLVER_TOOL_NAME if has_explicit_time_range(message) else "auto"
-            ),
+            tool_choice=RESOLVER_TOOL_NAME if has_explicit_date_range(message) else "auto",
             enable_thinking=False,
             workload="action",
         )
@@ -165,38 +159,17 @@ class RentalPeriodResolver:
                 continue
             try:
                 period = RentalPeriodInput.model_validate(call.arguments)
-            except ValidationError:
-                return RentalPeriodResolution(
-                    rental_period=None,
-                    clarification="请确认完整的开始日期时间和结束日期时间。",
-                    usage=response.usage,
-                )
-            zone = ZoneInfo(timezone)
-            if (
-                period.start_at.utcoffset() != period.start_at.astimezone(zone).utcoffset()
-                or period.end_at.utcoffset() != period.end_at.astimezone(zone).utcoffset()
-            ):
-                return RentalPeriodResolution(
-                    rental_period=None,
-                    clarification=f"请按 {timezone} 时区确认开始和结束时间。",
-                    usage=response.usage,
-                )
-            try:
                 self._policy.validate(period, now_utc=now_utc)
-            except InvalidRentalPeriod as error:
+            except (ValidationError, InvalidRentalPeriod):
                 return RentalPeriodResolution(
                     rental_period=None,
-                    clarification=str(error),
+                    clarification="请确认完整的开始日期和归还日期；最早可从后天开始租，归还日期包含当天。",
                     usage=response.usage,
                 )
             return RentalPeriodResolution(
-                rental_period=period,
-                clarification=None,
-                usage=response.usage,
+                rental_period=period, clarification=None, usage=response.usage
             )
-        clarification = response.text.strip() or ("请确认具体的开始日期时间和结束日期时间。")
+        clarification = response.text.strip() or "请确认具体的开始日期和归还日期。"
         return RentalPeriodResolution(
-            rental_period=None,
-            clarification=clarification,
-            usage=response.usage,
+            rental_period=None, clarification=clarification, usage=response.usage
         )

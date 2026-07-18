@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from gearmate.actions import AgentAction
 from gearmate.agent.graph import GearMateAgent
@@ -75,8 +75,8 @@ async def test_product_search_is_routed_without_main_model_tool_choice() -> None
     model = FakeModel()
     tools = FakeTools()
     period = RentalPeriodInput(
-        start_at=datetime(2026, 7, 20, tzinfo=UTC),
-        end_at=datetime(2026, 7, 22, tzinfo=UTC),
+        start_date=date(2026, 7, 20),
+        end_date=date(2026, 7, 22),
     )
 
     result = await GearMateAgent(
@@ -103,7 +103,10 @@ async def test_product_search_is_routed_without_main_model_tool_choice() -> None
     assert tools.calls[0].name == "search_products"
     assert tools.calls[0].arguments["keyword"] == "相机"
     assert tools.calls[0].arguments["equipmentRole"] == "camera"
-    assert tools.calls[0].arguments["rentalPeriod"]["startAt"] == ("2026-07-20T00:00:00Z")
+    assert tools.calls[0].arguments["rentalPeriod"] == {
+        "startDate": "2026-07-20",
+        "endDate": "2026-07-22",
+    }
     assert "Sony A7M4" in result.text
 
 
@@ -176,8 +179,8 @@ async def test_availability_without_product_id_clarifies_without_tools() -> None
         message="这段时间有货吗？",
         history=[],
         rental_period=RentalPeriodInput(
-            start_at=datetime(2026, 7, 20, tzinfo=UTC),
-            end_at=datetime(2026, 7, 22, tzinfo=UTC),
+            start_date=date(2026, 7, 20),
+            end_date=date(2026, 7, 22),
         ),
         scenario_plan=None,
         action=AgentAction(action="availability"),
@@ -196,8 +199,8 @@ class QuoteTools(FakeTools):
         self.calls.extend(calls)
         availability = AvailabilityResult(
             product_id="01J00000000000000000000101",
-            start_at=datetime(2026, 7, 20, tzinfo=UTC),
-            end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+            start_date=date(2026, 7, 20),
+            end_date=date(2026, 7, 21),
             available=True,
             available_count=1,
             checked_at=datetime(2026, 7, 18, tzinfo=UTC),
@@ -205,8 +208,8 @@ class QuoteTools(FakeTools):
         quote = QuoteResult(
             quote_id="01J00000000000000000000901",
             product_id=availability.product_id,
-            start_at=availability.start_at,
-            end_at=availability.end_at,
+            start_date=availability.start_date,
+            end_date=availability.end_date,
             expires_at=datetime(2026, 7, 18, 1, tzinfo=UTC),
             price_snapshot=PriceSnapshot(
                 currency="CNY",
@@ -242,8 +245,8 @@ async def test_quote_checks_availability_before_generating_price() -> None:
     model = FakeModel()
     tools = QuoteTools()
     period = RentalPeriodInput(
-        start_at=datetime(2026, 7, 20, tzinfo=UTC),
-        end_at=datetime(2026, 7, 21, 8, tzinfo=UTC),
+        start_date=date(2026, 7, 20),
+        end_date=date(2026, 7, 21),
     )
 
     result = await GearMateAgent(

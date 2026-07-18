@@ -384,15 +384,11 @@ class ToolRegistry:
         items = result.items
         if request.max_daily_rate is not None:
             items = tuple(
-                item
-                for item in items
-                if Decimal(item.daily_rate) <= request.max_daily_rate
+                item for item in items if Decimal(item.daily_rate) <= request.max_daily_rate
             )
         if request.target_daily_rate is not None:
             target_daily_rate = request.target_daily_rate
-            original_positions = {
-                item.product_id: index for index, item in enumerate(items)
-            }
+            original_positions = {item.product_id: index for index, item in enumerate(items)}
             items = tuple(
                 sorted(
                     items,
@@ -451,8 +447,8 @@ class ToolRegistry:
                     availability = await self._rentflow.search_availability(
                         AvailabilityInput(
                             product_id=product_id,
-                            start_at=request.rental_period.start_at,
-                            end_at=request.rental_period.end_at,
+                            start_date=request.rental_period.start_date,
+                            end_date=request.rental_period.end_date,
                         )
                     )
                     available_count = availability.available_count

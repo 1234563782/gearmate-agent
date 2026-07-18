@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import httpx
@@ -76,8 +76,8 @@ class FakeRepository:
         self.remembered = rental_period
         state = self.state or ConversationStateMemory(None, None)
         self.state = ConversationStateMemory(
-            rental_period.start_at,
-            rental_period.end_at,
+            rental_period.start_date,
+            rental_period.end_date,
             state.rental_requirements,
             state.pending_product_search,
             state.pending_rental_action,
@@ -104,8 +104,8 @@ class FakeRepository:
         self.remembered_pending_search = pending_search
         state = self.state or ConversationStateMemory(None, None)
         self.state = ConversationStateMemory(
-            state.rental_start_at,
-            state.rental_end_at,
+            state.rental_start_date,
+            state.rental_end_date,
             state.rental_requirements,
             pending_search,
             state.pending_rental_action,
@@ -116,8 +116,8 @@ class FakeRepository:
         self.remembered_pending_search = None
         if self.state is not None:
             self.state = ConversationStateMemory(
-                self.state.rental_start_at,
-                self.state.rental_end_at,
+                self.state.rental_start_date,
+                self.state.rental_end_date,
                 self.state.rental_requirements,
                 None,
                 self.state.pending_rental_action,
@@ -132,8 +132,8 @@ class FakeRepository:
         self.remembered_pending_rental_action = pending_action
         state = self.state or ConversationStateMemory(None, None)
         self.state = ConversationStateMemory(
-            state.rental_start_at,
-            state.rental_end_at,
+            state.rental_start_date,
+            state.rental_end_date,
             state.rental_requirements,
             state.pending_product_search,
             pending_action,
@@ -144,8 +144,8 @@ class FakeRepository:
         self.remembered_pending_rental_action = None
         if self.state is not None:
             self.state = ConversationStateMemory(
-                self.state.rental_start_at,
-                self.state.rental_end_at,
+                self.state.rental_start_date,
+                self.state.rental_end_date,
                 self.state.rental_requirements,
                 self.state.pending_product_search,
                 None,
@@ -160,8 +160,8 @@ class FakeRepository:
         self.remembered_recent_search = recent_search
         state = self.state or ConversationStateMemory(None, None)
         self.state = ConversationStateMemory(
-            state.rental_start_at,
-            state.rental_end_at,
+            state.rental_start_date,
+            state.rental_end_date,
             state.rental_requirements,
             state.pending_product_search,
             state.pending_rental_action,
@@ -202,8 +202,8 @@ async def test_run_resolves_and_remembers_natural_language_period() -> None:
     message = "2026 年 7 月 20 日 9 点到 7 月 22 日 18 点租一台相机"
     repository = FakeRepository(message)
     period_arguments = {
-        "startAt": "2026-07-20T09:00:00+08:00",
-        "endAt": "2026-07-22T18:00:00+08:00",
+        "startDate": "2026-07-20",
+        "endDate": "2026-07-22",
     }
     model = SequenceModel(
         [
@@ -347,8 +347,8 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
                         id="period-confirmed",
                         name="set_rental_period",
                         arguments={
-                                "startAt": "2026-07-20T14:00:00+08:00",
-                                "endAt": "2026-07-21T14:00:00+08:00",
+                                "startDate": "2026-07-20",
+                                "endDate": "2026-07-21",
                         },
                     ),
                 ),
@@ -500,8 +500,8 @@ async def test_structured_period_outside_window_does_not_create_run_or_memory() 
                 access_token="token",
                 message="搜索相机",
                 rental_period=RentalPeriodInput(
-                    start_at=datetime(2035, 7, 20, tzinfo=UTC),
-                    end_at=datetime(2035, 7, 22, tzinfo=UTC),
+                    start_date=date(2035, 7, 20),
+                    end_date=date(2035, 7, 22),
                 ),
             )
 
@@ -513,8 +513,8 @@ def complete_scenario_state(
     rental_period: RentalPeriodInput | None = None,
 ) -> ConversationStateMemory:
     return ConversationStateMemory(
-        rental_period.start_at if rental_period else None,
-        rental_period.end_at if rental_period else None,
+        rental_period.start_date if rental_period else None,
+        rental_period.end_date if rental_period else None,
         RentalRequirements(
             scenario_id="live_streaming",
             daily_budget=Decimal("500"),
@@ -775,14 +775,14 @@ async def test_changed_product_category_does_not_inherit_pending_use_case() -> N
 async def test_saved_valid_period_is_reused_for_availability() -> None:
     product_id = "01J00000000000000000000101"
     period = RentalPeriodInput(
-        start_at=datetime(2026, 7, 20, tzinfo=UTC),
-        end_at=datetime(2026, 7, 22, tzinfo=UTC),
+        start_date=date(2026, 7, 20),
+        end_date=date(2026, 7, 22),
     )
     repository = FakeRepository("这台有货吗？")
     scenario_state = complete_scenario_state(period)
     repository.state = ConversationStateMemory(
-        scenario_state.rental_start_at,
-        scenario_state.rental_end_at,
+        scenario_state.rental_start_date,
+        scenario_state.rental_end_date,
         scenario_state.rental_requirements,
         recent_product_search=RecentProductSearch(
             items=(
@@ -826,8 +826,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
             200,
             json={
                 "productId": product_id,
-                "startAt": "2026-07-20T00:00:00Z",
-                "endAt": "2026-07-22T00:00:00Z",
+                "startDate": "2026-07-20",
+                "endDate": "2026-07-22",
                 "available": True,
                 "availableCount": 2,
                 "checkedAt": "2026-07-15T08:00:00Z",
@@ -857,8 +857,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
 
     assert bodies == [
         {
-            "startAt": "2026-07-20T00:00:00Z",
-            "endAt": "2026-07-22T00:00:00Z",
+            "startDate": "2026-07-20",
+            "endDate": "2026-07-22",
             "productId": product_id,
         }
     ]
@@ -871,8 +871,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
         if event_type == "recommendation.presented"
     ]
     assert presentations[0]["rentalPeriod"] == {
-        "startAt": "2026-07-20T00:00:00Z",
-        "endAt": "2026-07-22T00:00:00Z",
+        "startDate": "2026-07-20",
+        "endDate": "2026-07-22",
     }
     assert presentations[0]["sections"][0]["products"][0]["availableCount"] == 2  # type: ignore[index]
 
@@ -999,8 +999,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
                         id="confirmed-period",
                         name="set_rental_period",
                         arguments={
-                            "startAt": "2026-07-20T18:00:00+08:00",
-                            "endAt": "2026-07-21T18:00:00+08:00",
+                            "startDate": "2026-07-20",
+                            "endDate": "2026-07-21",
                         },
                     ),
                 ),
@@ -1015,8 +1015,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
             200,
             json={
                 "productId": product_id,
-                "startAt": "2026-07-20T10:00:00Z",
-                "endAt": "2026-07-21T10:00:00Z",
+                "startDate": "2026-07-20",
+                "endDate": "2026-07-21",
                 "available": True,
                 "availableCount": 1,
                 "checkedAt": "2026-07-15T09:00:00Z",
@@ -1044,8 +1044,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
 
     assert bodies == [
         {
-            "startAt": "2026-07-20T18:00:00+08:00",
-            "endAt": "2026-07-21T18:00:00+08:00",
+            "startDate": "2026-07-20",
+            "endDate": "2026-07-21",
             "productId": product_id,
         }
     ]

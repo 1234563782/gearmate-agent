@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import httpx
 
@@ -24,8 +24,8 @@ def order_payload() -> dict[str, object]:
         "equipmentDisplayCode": None,
         "status": "CONFIRMED",
         "effectiveStatus": "CONFIRMED",
-        "startAt": "2026-07-20T10:00:00Z",
-        "endAt": "2026-07-22T10:00:00Z",
+        "startDate": "2026-07-20",
+        "endDate": "2026-07-22",
         "expiresAt": "2026-07-20T09:00:00Z",
         "priceSnapshot": {
             "currency": "CNY",
@@ -102,7 +102,7 @@ def test_order_response_is_localized_grounded_and_hides_internal_ids() -> None:
 
     assert "iPhone 15 Pro Max" in text
     assert "已确认" in text
-    assert "2026-07-20 18:00" in text
+    assert "2026-07-20 至 2026-07-22（结束日包含）" in text
     assert "¥4860.00" in text
     assert "01J000" not in text
     assert facts.validate(text).valid
@@ -121,7 +121,7 @@ def test_empty_order_result_is_explicit() -> None:
     assert text == "当前筛选条件下没有订单。"
 
 
-def test_order_timestamp_models_require_timezone() -> None:
+def test_order_rental_dates_are_date_only_while_lifecycle_timestamps_keep_timezone() -> None:
     order = OrderPage.model_validate(
         {
             "items": [order_payload()],
@@ -132,7 +132,9 @@ def test_order_timestamp_models_require_timezone() -> None:
         }
     ).items[0]
 
-    assert order.start_at == datetime(2026, 7, 20, 10, tzinfo=UTC)
+    assert order.start_date == date(2026, 7, 20)
+    assert order.end_date == date(2026, 7, 22)
+    assert order.confirmed_at == datetime(2026, 7, 16, 10, 5, tzinfo=UTC)
 
 
 class NoCallModel:

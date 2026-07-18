@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -131,8 +132,8 @@ class ConversationState(Base):
         ForeignKey("conversations.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    rental_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    rental_end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rental_start_date: Mapped[date | None] = mapped_column(Date)
+    rental_end_date: Mapped[date | None] = mapped_column(Date)
     attributes: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -236,9 +237,7 @@ class CatalogAlias(Base):
     entity_type: Mapped[str] = mapped_column(String(32), primary_key=True)
     canonical_value: Mapped[str] = mapped_column(String(128), nullable=False)
     locale: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'und'"))
-    source: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default=text("'manual'")
-    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'manual'"))
     active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

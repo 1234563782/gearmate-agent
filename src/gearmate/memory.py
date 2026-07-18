@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from math import ceil
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -32,8 +32,8 @@ TIME_CONTEXT_TEMPLATE = """当前可信时间:
 
 @dataclass(frozen=True, slots=True)
 class ConversationStateMemory:
-    rental_start_at: datetime | None
-    rental_end_at: datetime | None
+    rental_start_date: date | None
+    rental_end_date: date | None
     rental_requirements: RentalRequirements | None = None
     pending_product_search: PendingProductSearch | None = None
     pending_rental_action: PendingRentalAction | None = None
@@ -244,12 +244,12 @@ class ConversationMemoryService:
         rental_period = None
         if (
             state is not None
-            and state.rental_start_at is not None
-            and state.rental_end_at is not None
+            and state.rental_start_date is not None
+            and state.rental_end_date is not None
         ):
             stored_period = RentalPeriodInput(
-                start_at=state.rental_start_at,
-                end_at=state.rental_end_at,
+                start_date=state.rental_start_date,
+                end_date=state.rental_end_date,
             )
             try:
                 rental_period = self._rental_period_policy.validate(
