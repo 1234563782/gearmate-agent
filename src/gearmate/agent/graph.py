@@ -3,9 +3,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Literal
-
-from langgraph.graph import END, START, StateGraph
+from typing import Any, cast
 
 from gearmate.actions import AgentAction
 from gearmate.config import Settings
@@ -386,33 +384,7 @@ class GearMateAgent:
             )
             return {"final_text": text, "stop_reason": state["stop_reason"] or "COMPLETED"}
 
-        def after_preprocess(
-            state: AgentState,
-        ) -> Literal["model", "tools", "finalize"]:
-            if state["final_text"]:
-                return "finalize"
-            return "tools" if state["pending_tool_calls"] else "model"
-
-        def after_model(state: AgentState) -> Literal["tools", "validate"]:
-            return "tools" if state["pending_tool_calls"] else "validate"
-
-        def after_tools(state: AgentState) -> Literal["model", "validate"]:
-            return "validate" if state["final_text"] else "model"
-
-        graph = StateGraph(AgentState)
-        graph.add_node("preprocess", preprocess)
-        graph.add_node("model", call_model)
-        graph.add_node("tools", execute_tools)
-        graph.add_node("validate", validate_output)
-        graph.add_node("finalize", finalize)
-        graph.add_edge(START, "preprocess")
-        graph.add_conditional_edges("preprocess", after_preprocess)
-        graph.add_conditional_edges("model", after_model)
-        graph.add_conditional_edges("tools", after_tools)
-        graph.add_edge("validate", "finalize")
-        graph.add_edge("finalize", END)
-        compiled = graph.compile()
-        initial: AgentState = {
+        state: AgentState = {
             "messages": messages,
             "pending_tool_calls": automatic_tool_calls,
             "final_text": None,
@@ -423,13 +395,36 @@ class GearMateAgent:
             "input_tokens": 0,
             "output_tokens": 0,
         }
-        final = await compiled.ainvoke(initial)
+        step = "preprocess"
+        while True:
+            if step == "preprocess":
+                state.update(cast(AgentState, await preprocess(state)))
+                step = (
+                    "finalize"
+                    if state["final_text"]
+                    else ("tools" if state["pending_tool_calls"] else "model")
+                )
+                continue
+            if step == "model":
+                state.update(cast(AgentState, await call_model(state)))
+                step = "tools" if state["pending_tool_calls"] else "validate"
+                continue
+            if step == "tools":
+                state.update(cast(AgentState, await execute_tools(state)))
+                step = "validate" if state["final_text"] else "model"
+                continue
+            if step == "validate":
+                state.update(cast(AgentState, await validate_output(state)))
+                step = "finalize"
+                continue
+            state.update(cast(AgentState, await finalize(state)))
+            break
         return AgentResult(
-            text=final["final_text"] or grounded_response(),
-            stop_reason=final["stop_reason"] or "COMPLETED",
-            error_code=final["error_code"],
-            model_rounds=final["model_rounds"],
-            tool_call_count=final["tool_call_count"],
-            input_tokens=final["input_tokens"],
-            output_tokens=final["output_tokens"],
+            text=state["final_text"] or grounded_response(),
+            stop_reason=state["stop_reason"] or "COMPLETED",
+            error_code=state["error_code"],
+            model_rounds=state["model_rounds"],
+            tool_call_count=state["tool_call_count"],
+            input_tokens=state["input_tokens"],
+            output_tokens=state["output_tokens"],
         )

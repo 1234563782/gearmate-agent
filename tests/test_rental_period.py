@@ -126,7 +126,9 @@ async def test_resolver_rejects_datetime_period_payloads() -> None:
     )
 
     assert result.rental_period is None
-    assert result.clarification == "请确认完整的开始日期和归还日期；最早可从后天开始租，归还日期包含当天。"
+    assert result.clarification == (
+        "请确认完整的开始日期和归还日期；最早可从后天开始租，归还日期包含当天。"
+    )
 
 
 def test_temporal_signal_detection() -> None:
@@ -192,4 +194,6 @@ async def test_resolver_rejects_period_beyond_advance_window() -> None:
     )
 
     assert result.rental_period is None
-    assert result.clarification == "请确认完整的开始日期和归还日期；最早可从后天开始租，归还日期包含当天。"
+    assert result.clarification == (
+        "请确认完整的开始日期和归还日期；最早可从后天开始租，归还日期包含当天。"
+    )
