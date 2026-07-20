@@ -1,3 +1,3 @@
-from gearmate.agent.graph import AgentResult, GearMateAgent
+from gearmate.agent.workflow import AgentResult, GearMateAgent
 
 __all__ = ["AgentResult", "GearMateAgent"]

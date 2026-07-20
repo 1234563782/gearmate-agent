@@ -205,10 +205,100 @@ def tool_metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(results),
         "byExpectedTool": by_tool,
         "definition": (
-            "The first planned route derived from AgentAction; this does not measure "
-            "RentFlow execution success."
+            "根据 AgentAction 推导的首个计划工具路由；"
+            "该指标不衡量 RentFlow 工具接口执行成功率。"
         ),
     }
+
+
+def _markdown_text(value: object) -> str:
+    if value is None:
+        return "空"
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def _normalization_difference(result: dict[str, Any]) -> str:
+    expected = result["expectedNormalization"]
+    predicted = result["predictedNormalization"]
+    if expected is None or predicted is None:
+        return ""
+    differences = [
+        f"{field}: {_markdown_text(expected[field])} -> {_markdown_text(predicted[field])}"
+        for field in NORMALIZATION_FIELDS
+        if expected[field] != predicted[field]
+    ]
+    return "<br>".join(differences)
+
+
+def render_failure_markdown(report: dict[str, Any]) -> str:
+    failures = report["failures"]
+    intent_failures = sum(not result["intentCorrect"] for result in failures)
+    normalization_failures = sum(
+        result["normalizationCorrect"] is False for result in failures
+    )
+    tool_failures = sum(not result["toolCorrect"] for result in failures)
+    request_failures = sum(result["error"] is not None for result in failures)
+    lines = [
+        "# 动作路由失败案例",
+        "",
+        f"- 测评时间：`{report['metadata']['generatedAt']}`",
+        f"- 模型：`{report['metadata']['modelId']}`",
+        f"- 总样本：`{report['metadata']['caseCount']}`",
+        f"- 失败记录：`{len(failures)}`",
+        f"- 意图失败：`{intent_failures}`",
+        f"- 归一化失败：`{normalization_failures}`",
+        f"- 工具路由失败：`{tool_failures}`",
+        f"- 模型请求失败：`{request_failures}`",
+        "",
+        "> 一条案例可能同时存在意图失败和工具路由失败，分类数量不能直接相加。",
+        "",
+        "| caseId | 用户输入 | 失败类型 | 期望结果 | 实际结果 |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for result in failures:
+        failure_types: list[str] = []
+        expected_parts: list[str] = []
+        predicted_parts: list[str] = []
+        if not result["intentCorrect"]:
+            failure_types.append("意图识别")
+            expected_parts.append(f"意图: {result['expectedAction']}")
+            predicted_parts.append(f"意图: {result['predictedAction']}")
+        if result["normalizationCorrect"] is False:
+            failure_types.append("实体归一化")
+            expected_parts.append("归一化字段见实际差异")
+            predicted_parts.append(_normalization_difference(result))
+        if not result["toolCorrect"]:
+            failure_types.append("工具路由")
+            expected_parts.append(f"工具: {_markdown_text(result['expectedTool'])}")
+            predicted_parts.append(f"工具: {_markdown_text(result['predictedTool'])}")
+        if result["error"] is not None:
+            failure_types.append("模型请求")
+            expected_parts.append("请求成功")
+            predicted_parts.append(f"异常: {_markdown_text(result['error'])}")
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _markdown_text(result["caseId"]),
+                    _markdown_text(result["message"]),
+                    "、".join(failure_types),
+                    "<br>".join(expected_parts),
+                    "<br>".join(predicted_parts),
+                )
+            )
+            + " |"
+        )
+    lines.extend(
+        (
+            "",
+            "## 查看完整预测",
+            "",
+            "本文件只展示不一致字段。完整的动作载荷、Token、耗时和错误信息，"
+            "请查看同名 JSON 报告中的 `failures` 或 `results`。",
+            "",
+        )
+    )
+    return "\n".join(lines)
 
 
 async def evaluate_case(
@@ -347,7 +437,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate action intent, catalog normalization, and planned tool routing."
+        description="测评动作意图、目录实体归一化和首工具路由。"
     )
     parser.add_argument(
         "--dataset",
@@ -374,24 +464,27 @@ def main() -> None:
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    failure_output = output.with_name(f"{output.stem}_failures.md")
+    failure_output.write_text(render_failure_markdown(report), encoding="utf-8")
     metrics = report["metrics"]
-    print(f"report: {output}")
+    print(f"完整报告：{output}")
+    print(f"失败案例：{failure_output}")
     print(
-        "intent: "
-        f"accuracy={metrics['intent']['accuracy']}, "
-        f"macro_f1={metrics['intent']['macroF1']}"
+        "意图识别："
+        f"准确率={metrics['intent']['accuracy']}，"
+        f"Macro-F1={metrics['intent']['macroF1']}"
     )
     print(
-        "normalization: "
-        f"case_exact={metrics['normalization']['caseExactMatch']}, "
-        f"positive_field_accuracy={metrics['normalization']['positiveFieldAccuracy']}, "
-        f"false_positive_rate={metrics['normalization']['falsePositiveRate']}"
+        "实体归一化："
+        f"整例准确率={metrics['normalization']['caseExactMatch']}，"
+        f"非空字段准确率={metrics['normalization']['positiveFieldAccuracy']}，"
+        f"错误归一率={metrics['normalization']['falsePositiveRate']}"
     )
     print(
-        "tool_selection: "
-        f"planned_tool_accuracy={metrics['toolSelection']['plannedToolAccuracy']}"
+        "工具选择："
+        f"首工具路由准确率={metrics['toolSelection']['plannedToolAccuracy']}"
     )
-    print(f"failed_requests: {report['metadata']['failedRequests']}")
+    print(f"模型请求失败：{report['metadata']['failedRequests']}")
 
 
 if __name__ == "__main__":

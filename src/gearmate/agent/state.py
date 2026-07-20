@@ -13,7 +13,7 @@ RunStatus = Literal[
 ]
 
 
-class GearMateGraphState(TypedDict):
+class AgentState(TypedDict):
     conversation_id: NotRequired[str]
     run_id: NotRequired[str]
     user_id: NotRequired[str]

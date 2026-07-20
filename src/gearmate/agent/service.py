@@ -12,7 +12,7 @@ from gearmate.actions import (
     merge_pending_product_search,
     merge_pending_rental_action,
 )
-from gearmate.agent.graph import GearMateAgent
+from gearmate.agent.workflow import GearMateAgent
 from gearmate.catalog import CatalogSearchService
 from gearmate.config import Settings
 from gearmate.intent_router import IntentPreRouteDecision, IntentPreRouter

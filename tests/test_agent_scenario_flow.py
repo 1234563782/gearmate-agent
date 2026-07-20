@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from gearmate.actions import AgentAction
-from gearmate.agent.graph import GearMateAgent
+from gearmate.agent import GearMateAgent
 from gearmate.config import Settings
 from gearmate.llm.types import ModelRequest, ModelResponse, ModelUsage
 from gearmate.prompts.loader import RenderedPrompt

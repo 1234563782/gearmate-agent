@@ -6,8 +6,8 @@ from time import monotonic
 from typing import Any, cast
 
 from gearmate.actions import AgentAction
+from gearmate.agent.state import AgentState
 from gearmate.config import Settings
-from gearmate.graph_state import GearMateGraphState
 from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolCall
 from gearmate.prompts.loader import RenderedPrompt
@@ -23,9 +23,6 @@ AUTOMATIC_SCENARIO_KIT_CALL_ID = "automatic-scenario-kit"
 AUTOMATIC_ACTION_CALL_ID = "automatic-action"
 AUTOMATIC_QUOTE_AVAILABILITY_CALL_ID = "automatic-quote-availability"
 AUTOMATIC_QUOTE_CALL_ID = "automatic-quote"
-
-
-AgentState = GearMateGraphState
 
 
 @dataclass(frozen=True, slots=True)
