@@ -1,0 +1,200 @@
+{"caseId":"chat-001","message":"你好","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-002","message":"谢谢你的帮助","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-003","message":"你能做什么？","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-004","message":"你是谁？","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-005","message":"给我讲个笑话","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-006","message":"今天天气怎么样？","expectedAction":"chat","expectedTool":null}
+{"caseId":"search-001","message":"找一台苹果电脑做视频剪辑，每天200元左右","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Apple","model":null,"useCaseId":"01J00000000000000000000202","orderStatus":null}}
+{"caseId":"search-002","message":"想租大疆无人机去航拍","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"drone","brand":"DJI","model":null,"useCaseId":"01J00000000000000000000206","orderStatus":null}}
+{"caseId":"search-003","message":"推荐一台微单做活动摄影","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":null,"model":null,"useCaseId":"01J00000000000000000000203","orderStatus":null}}
+{"caseId":"search-004","message":"找一台适合手机直播的手机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":null,"model":null,"useCaseId":"01J00000000000000000000204","orderStatus":null}}
+{"caseId":"search-005","message":"帮我找 MacBook Pro 14","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Apple","model":"MacBook Pro 14","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-006","message":"搜索 Sony A7M4 相机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Sony","model":"A7M4","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-007","message":"找 GoPro HERO 运动相机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"action_camera","brand":"GoPro","model":"HERO","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-008","message":"找个话筒录播客","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":null,"model":null,"useCaseId":"01J00000000000000000000209","orderStatus":null}}
+{"caseId":"search-009","message":"找一台投影仪用于发布会","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"projector","brand":null,"model":null,"useCaseId":"01J00000000000000000000208","orderStatus":null}}
+{"caseId":"search-010","message":"找台笔记本打游戏","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":null,"model":null,"useCaseId":"01J00000000000000000000207","orderStatus":null}}
+{"caseId":"search-011","message":"搜索 Elgato Cam Link 4K","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"capture_card","brand":"Elgato","model":"Cam Link 4K","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-012","message":"找佳能 RF70-200F2.8L 镜头","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lens","brand":"Canon","model":"RF70-200F2.8L","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-013","message":"找个三脚架做直播","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"tripod","brand":null,"model":null,"useCaseId":"01J00000000000000000000204","orderStatus":null}}
+{"caseId":"search-014","message":"找 Aputure 补光灯做活动摄影","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lighting","brand":"Aputure","model":null,"useCaseId":"01J00000000000000000000203","orderStatus":null}}
+{"caseId":"detail-001","message":"查看商品 01J00000000000000000000101 的详细信息","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-002","message":"介绍一下商品 01J00000000000000000000105","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-003","message":"商品 01J00000000000000000000114 有哪些参数？","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-004","message":"我想看 01J00000000000000000000118 的详情","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-005","message":"详细说说 01J00000000000000000000121 这款手机","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-006","message":"01J00000000000000000000119 是什么设备？","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"availability-001","message":"商品 01J00000000000000000000101 在2026年7月25日到27日有货吗？","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-002","message":"帮我查 01J00000000000000000000105 7月28日至30日的库存","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-003","message":"01J00000000000000000000114 下周一到周三能租吗？","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-004","message":"查一下 01J00000000000000000000118 明天起租三天还有几台","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-005","message":"商品 01J00000000000000000000121 8月1日到3日可租吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-006","message":"看看 01J00000000000000000000109 周末有没有库存","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"quote-001","message":"给商品 01J00000000000000000000101 生成7月25日到27日的正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-002","message":"我要 01J00000000000000000000105 7月28日至30日的报价单","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-003","message":"帮我算 01J00000000000000000000114 下周一到周三的正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-004","message":"为 01J00000000000000000000118 明天起租三天创建报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-005","message":"商品 01J00000000000000000000121 8月1日到3日一共多少钱，生成正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-006","message":"请出一份 01J00000000000000000000109 周末两天的正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"order-001","message":"查看我的订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"order-002","message":"查一下我的待确认订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"PENDING_CONFIRMATION"}}
+{"caseId":"order-003","message":"列出我已经确认的订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CONFIRMED"}}
+{"caseId":"order-004","message":"我有哪些已收货订单？","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"RECEIVED"}}
+{"caseId":"order-005","message":"查看我的已取消订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CANCELLED"}}
+{"caseId":"order-006","message":"列出我已经过期的订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"EXPIRED"}}
+{"caseId":"scenario-001","message":"我需要一套直播设备，预算每天500元","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-002","message":"帮我准备20人商务会议需要的设备","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-003","message":"我要租一套活动拍摄设备","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-004","message":"相机直播，一个机位，需要麦克风和补光灯","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-005","message":"公司发布会要投影和扩音设备，大约100人","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-006","message":"婚礼拍摄需要两台相机和现场补光","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"chat-007","message":"早上好","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-008","message":"晚上好呀","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-009","message":"辛苦了","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-010","message":"不客气","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-011","message":"再见","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-012","message":"hello","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-013","message":"Hi there!","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-014","message":"Good morning","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-015","message":"What can you help me with?","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-016","message":"你支持哪些功能？","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-017","message":"介绍一下 GearMate","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-018","message":"我暂时不租了","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-019","message":"好的","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-020","message":"明白了","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-021","message":"嗯嗯","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-022","message":"收到","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-023","message":"你会说英文吗？","expectedAction":"chat","expectedTool":null}
+{"caseId":"chat-024","message":"先随便聊聊","expectedAction":"chat","expectedTool":null}
+{"caseId":"search-015","message":"帮我找一台摄像机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-016","message":"我想租个镜头","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lens","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-017","message":"有哪些运动相机可以租","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"action_camera","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-018","message":"给我看看无人机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"drone","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-019","message":"租一台笔记本电脑","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-020","message":"推荐一个补光灯","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lighting","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-021","message":"我需要一张采集卡","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"capture_card","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-022","message":"有什么话筒可以租","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-023","message":"找一台投影仪","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"projector","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-024","message":"我想租一部手机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-025","message":"有没有稳定一点的三脚架","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"tripod","brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-026","message":"推荐一台 Sony 相机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Sony","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-027","message":"找一台佳能相机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Canon","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-028","message":"I need an Apple laptop","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Apple","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-029","message":"帮我找戴尔电脑","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Dell","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-030","message":"想租联想游戏本打游戏","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Lenovo","model":null,"useCaseId":"01J00000000000000000000207","orderStatus":null}}
+{"caseId":"search-031","message":"大疆运动相机有哪些","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"action_camera","brand":"DJI","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-032","message":"租一台 Epson 投影仪","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"projector","brand":"Epson","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-033","message":"找 Rode 麦克风","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":"Rode","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-034","message":"有没有 Shure 话筒","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":"Shure","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-035","message":"找 Aputure 影视灯","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lighting","brand":"Aputure","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-036","message":"Manfrotto 的三脚架有吗","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"tripod","brand":"Manfrotto","model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"search-037","message":"找 Blackmagic 的直播采集卡","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"capture_card","brand":"Blackmagic Design","model":null,"useCaseId":"01J00000000000000000000204","orderStatus":null}}
+{"caseId":"search-038","message":"三星手机用于移动办公","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"Samsung","model":null,"useCaseId":"01J00000000000000000000201","orderStatus":null}}
+{"caseId":"search-039","message":"小米手机用来旅行记录","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"Xiaomi","model":null,"useCaseId":"01J00000000000000000000205","orderStatus":null}}
+{"caseId":"search-040","message":"找一台 ASUS 手机打手游","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"ASUS","model":null,"useCaseId":"01J00000000000000000000207","orderStatus":null}}
+{"caseId":"search-041","message":"搜索 Canon EOS R6 Mark II","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Canon","model":"EOS R6 Mark II","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-042","message":"找 Sony SEL2470GM2 镜头","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lens","brand":"Sony","model":"SEL2470GM2","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-043","message":"我想租 DJI Air 3","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"drone","brand":"DJI","model":"Air 3","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-044","message":"搜索 Rode Wireless GO II","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":"Rode","model":"Wireless GO II","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-045","message":"有没有 Aputure Amaran 100d","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"lighting","brand":"Aputure","model":"Amaran 100d","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-046","message":"找 Manfrotto Befree","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"tripod","brand":"Manfrotto","model":"Befree","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-047","message":"搜索 Dell XPS 15 9530","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Dell","model":"XPS 15 9530","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-048","message":"找 Lenovo Legion R7000","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"Lenovo","model":"Legion R7000","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-049","message":"我需要 ASUS ProArt Studiobook 16","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":"ASUS","model":"ProArt Studiobook 16","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-050","message":"搜索 Sony FX3 摄影机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Sony","model":"FX3","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-051","message":"找 Fujifilm X-T5 相机","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"camera","brand":"Fujifilm","model":"X-T5","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-052","message":"想租 DJI Osmo Pocket 3","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"action_camera","brand":"DJI","model":"Osmo Pocket 3","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-053","message":"搜索 Epson CB-FH52 投影仪","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"projector","brand":"Epson","model":"CB-FH52","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-054","message":"找 Shure MV7 麦克风","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":"Shure","model":"MV7","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-055","message":"搜索 Blackmagic ATEM Mini Pro","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"capture_card","brand":"Blackmagic Design","model":"ATEM Mini Pro","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-056","message":"找 Apple iPhone 15 Pro Max","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"Apple","model":"iPhone 15 Pro Max","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-057","message":"搜索 Samsung Galaxy S24 Ultra","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"Samsung","model":"Galaxy S24 Ultra","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-058","message":"我想租 Xiaomi 14 Ultra","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"Xiaomi","model":"14 Ultra","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-059","message":"找 ASUS ROG Phone 8","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"smartphone","brand":"ASUS","model":"ROG Phone 8","useCaseId":null,"orderStatus":null}}
+{"caseId":"search-060","message":"预算每天100元以内，想找适合旅行记录的设备","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":"01J00000000000000000000205","orderStatus":null}}
+{"caseId":"search-061","message":"找台适合出差办公的电脑","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"laptop","brand":null,"model":null,"useCaseId":"01J00000000000000000000201","orderStatus":null}}
+{"caseId":"search-062","message":"推荐一个采访录音用的话筒","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"microphone","brand":null,"model":null,"useCaseId":"01J00000000000000000000209","orderStatus":null}}
+{"caseId":"search-063","message":"找一张适合电竞的采集卡","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"capture_card","brand":null,"model":null,"useCaseId":"01J00000000000000000000207","orderStatus":null}}
+{"caseId":"search-064","message":"培训演示用的投影仪有哪些","expectedAction":"product_search","expectedTool":"search_products","normalization":{"equipmentRole":"projector","brand":null,"model":null,"useCaseId":"01J00000000000000000000208","orderStatus":null}}
+{"caseId":"detail-007","message":"打开商品 01J00000000000000000000102 看看参数","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-008","message":"商品 01J00000000000000000000103 的押金是多少","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-009","message":"介绍一下 01J00000000000000000000104","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-010","message":"查看 01J00000000000000000000106 的商品详情","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-011","message":"01J00000000000000000000107 具体是什么型号","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-012","message":"我想了解商品 01J00000000000000000000108","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-013","message":"展示 01J00000000000000000000110 的详细资料","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-014","message":"Tell me more about product 01J00000000000000000000111","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-015","message":"商品 01J00000000000000000000112 是什么配置","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-016","message":"看看 01J00000000000000000000113 的日租和押金","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-017","message":"01J00000000000000000000116 这支镜头怎么样","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-018","message":"查看商品 01J00000000000000000000117","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-019","message":"详细介绍 01J00000000000000000000120","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"detail-020","message":"01J00000000000000000000124 这款设备的详情","expectedAction":"product_detail","expectedTool":"get_product"}
+{"caseId":"availability-007","message":"01J00000000000000000000102 7月26日到28日还有库存吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-008","message":"查商品 01J00000000000000000000103 从7月30日租到8月2日能不能租","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-009","message":"01J00000000000000000000104 8月5日至7日剩几台","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-010","message":"看看 01J00000000000000000000106 明后两天是否可租","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-011","message":"商品 01J00000000000000000000107 下周末有货吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-012","message":"查询 01J00000000000000000000108 8月10日到12日的可租数量","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-013","message":"01J00000000000000000000110 这个月底能租吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-014","message":"Check availability for 01J00000000000000000000111 from July 25 to July 27","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-015","message":"01J00000000000000000000112 8月15号起租两天还有吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-016","message":"查查 01J00000000000000000000113 9月1日到3日的库存","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-017","message":"01J00000000000000000000116 下个月第一个周末可租几台","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-018","message":"商品 01J00000000000000000000117 8月20日至22日是否有货","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-019","message":"01J00000000000000000000120 7月29日租一天能租到吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-020","message":"帮我确认 01J00000000000000000000122 8月6日到9日的库存","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-021","message":"01J00000000000000000000123 下周二开始租三天有现货吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-022","message":"商品 01J00000000000000000000124 9月10日至12日可用吗","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-023","message":"查询 01J00000000000000000000115 8月18日到20日库存","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"availability-024","message":"01J00000000000000000000119 这个周六周日还有几台","expectedAction":"availability","expectedTool":"check_availability"}
+{"caseId":"quote-007","message":"商品 01J00000000000000000000102 从7月26日租到28日，请生成报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-008","message":"给 01J00000000000000000000103 出一份7月30日到8月2日的报价单","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-009","message":"01J00000000000000000000104 8月5日至7日正式报价是多少","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-010","message":"为 01J00000000000000000000106 明后两天创建正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-011","message":"商品 01J00000000000000000000107 下周末的报价单","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-012","message":"生成 01J00000000000000000000108 8月10日到12日的报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-013","message":"01J00000000000000000000110 这个月底租用，请给正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-014","message":"Create a formal quote for 01J00000000000000000000111 from July 25 to July 27","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-015","message":"01J00000000000000000000112 8月15号起租两天一共多少钱，生成报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-016","message":"请出 01J00000000000000000000113 9月1日到3日的正式报价单","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-017","message":"给 01J00000000000000000000116 下个月第一个周末做报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-018","message":"01J00000000000000000000117 8月20日至22日的租金和押金，生成正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-019","message":"商品 01J00000000000000000000120 7月29日租一天，帮我创建报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-020","message":"为 01J00000000000000000000122 8月6日到9日出正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-021","message":"01J00000000000000000000123 下周二开始租三天，报价单给我","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-022","message":"商品 01J00000000000000000000124 9月10日至12日正式报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-023","message":"生成 01J00000000000000000000115 8月18日到20日的报价","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"quote-024","message":"01J00000000000000000000119 这个周六周日租两天，请给报价单","expectedAction":"quote","expectedTool":"create_quote"}
+{"caseId":"order-007","message":"我的订单记录在哪里","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"order-008","message":"列一下最近的租赁订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"order-009","message":"Show my orders","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"order-010","message":"还有哪些订单等我确认","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"PENDING_CONFIRMATION"}}
+{"caseId":"order-011","message":"看看待确认的租赁单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"PENDING_CONFIRMATION"}}
+{"caseId":"order-012","message":"查询已确认租赁订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CONFIRMED"}}
+{"caseId":"order-013","message":"哪些订单已经确认了","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CONFIRMED"}}
+{"caseId":"order-014","message":"查我的收货记录","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"RECEIVED"}}
+{"caseId":"order-015","message":"列出已经收到设备的订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"RECEIVED"}}
+{"caseId":"order-016","message":"我取消过哪些订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CANCELLED"}}
+{"caseId":"order-017","message":"Show my cancelled orders","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"CANCELLED"}}
+{"caseId":"order-018","message":"查询失效的订单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"EXPIRED"}}
+{"caseId":"order-019","message":"我有哪些超时过期的租赁单","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":"EXPIRED"}}
+{"caseId":"order-020","message":"帮我看看历史订单列表","expectedAction":"order_list","expectedTool":"list_orders","normalization":{"equipmentRole":null,"brand":null,"model":null,"useCaseId":null,"orderStatus":null}}
+{"caseId":"scenario-007","message":"手机直播要一整套设备，需要收音和补光","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-008","message":"Plan a complete live streaming equipment kit for me","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-009","message":"我要做双机位直播，还要麦克风和灯光","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-010","message":"带货直播整套设备每天预算800元","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-011","message":"婚礼跟拍要三台相机，不需要补光","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-012","message":"准备一套会议拍摄设备，两台机位加灯光","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-013","message":"活动摄影需要相机、镜头和三脚架整套方案","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-014","message":"公司年会需要完整拍摄设备，预算每天1200元","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-015","message":"50人的培训会议，需要投影和扩音","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-016","message":"帮我配一套公司会议设备，要大屏和麦克风","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-017","message":"产品发布会大约200人，要演示和音响设备","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-018","message":"商务会议整套设备怎么配","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-019","message":"我需要电脑、投影仪和麦克风开会","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-020","message":"相机直播两个机位，不要灯，要无线麦克风","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-021","message":"主播带货需要手机直播全套方案","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-022","message":"婚礼现场拍摄需要双机位和补光方案","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-023","message":"给30人小型会议配完整设备，不需要投影，需要扩音","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}
+{"caseId":"scenario-024","message":"预算每天600元，帮我组合一套活动拍摄器材","expectedAction":"scenario_continue","expectedTool":"set_rental_requirements"}

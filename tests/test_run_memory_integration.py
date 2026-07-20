@@ -1,6 +1,7 @@
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -199,11 +200,14 @@ class SequenceModel:
 
 
 async def test_run_resolves_and_remembers_natural_language_period() -> None:
-    message = "2026 年 7 月 20 日 9 点到 7 月 22 日 18 点租一台相机"
+    today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date()
+    start_date = today + timedelta(days=2)
+    end_date = start_date + timedelta(days=2)
+    message = f"{start_date.isoformat()} 到 {end_date.isoformat()} 租一台相机"
     repository = FakeRepository(message)
     period_arguments = {
-        "startDate": "2026-07-20",
-        "endDate": "2026-07-22",
+        "startDate": start_date.isoformat(),
+        "endDate": end_date.isoformat(),
     }
     model = SequenceModel(
         [
@@ -321,6 +325,10 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
     repository.message = "对"
     repository.events = []
     repository.finalized = None
+    confirmed_start = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date() + timedelta(
+        days=2
+    )
+    confirmed_end = confirmed_start + timedelta(days=1)
     second_model = SequenceModel(
         [
             ModelResponse(
@@ -347,8 +355,8 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
                         id="period-confirmed",
                         name="set_rental_period",
                         arguments={
-                                "startDate": "2026-07-20",
-                                "endDate": "2026-07-21",
+                                "startDate": confirmed_start.isoformat(),
+                                "endDate": confirmed_end.isoformat(),
                         },
                     ),
                 ),
@@ -575,6 +583,324 @@ async def test_thanks_does_not_replay_complete_saved_scenario() -> None:
     assert not any(event == "requirements.resolved" for event, _ in repository.events)
     assert not any(event == "tool.started" for event, _ in repository.events)
     assert model.requests[1].tools == ()
+    assert (
+        "action.resolution",
+        {
+            "source": "llm_tool_call",
+            "rule": None,
+            "actionModelCalled": True,
+        },
+    ) in repository.events
+
+
+async def test_enforced_pure_social_route_skips_only_the_action_model() -> None:
+    repository = FakeRepository("谢谢")
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="不客气。",
+                finish_reason="stop",
+                usage=ModelUsage(input_tokens=12, output_tokens=3),
+            )
+        ]
+    )
+    settings = Settings(_env_file=None, intent_pre_router_mode="enforce")
+    async with httpx.AsyncClient(base_url="http://localhost:8080") as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+        await coordinator._execute(
+            run_id="run-deterministic-chat",
+            conversation_id="conversation-deterministic-chat",
+            access_token="token",
+            message="谢谢",
+            rental_period=None,
+        )
+
+    assert len(model.requests) == 1
+    assert model.requests[0].tools == ()
+    assert repository.finalized is not None
+    assert repository.finalized["model_rounds"] == 1
+    assert repository.finalized["input_tokens"] == 12
+    assert repository.finalized["output_tokens"] == 3
+    assert (
+        "action.resolution",
+        {
+            "source": "deterministic",
+            "rule": "pure_social",
+            "actionModelCalled": False,
+        },
+    ) in repository.events
+
+
+async def test_shadow_mode_records_candidate_but_uses_the_llm_action() -> None:
+    repository = FakeRepository("谢谢")
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="",
+                finish_reason="tool_calls",
+                usage=ModelUsage(input_tokens=10, output_tokens=2),
+                tool_calls=(
+                    ModelToolCall(
+                        id="shadow-action",
+                        name="resolve_agent_action",
+                        arguments={"action": "chat"},
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text="不客气。",
+                finish_reason="stop",
+                usage=ModelUsage(input_tokens=12, output_tokens=3),
+            ),
+        ]
+    )
+    settings = Settings(_env_file=None, intent_pre_router_mode="shadow")
+    async with httpx.AsyncClient(base_url="http://localhost:8080") as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+        await coordinator._execute(
+            run_id="run-shadow-chat",
+            conversation_id="conversation-shadow-chat",
+            access_token="token",
+            message="谢谢",
+            rental_period=None,
+        )
+
+    assert len(model.requests) == 2
+    event = next(payload for name, payload in repository.events if name == "action.resolution")
+    assert event["source"] == "llm_tool_call"
+    assert event["rule"] is None
+    assert event["actionModelCalled"] is True
+    assert event["candidateRule"] == "pure_social"
+    assert event["candidateAction"] == event["llmAction"]
+    assert event["matched"] is True
+
+
+async def test_enforced_pre_router_miss_calls_the_action_model() -> None:
+    message = "你能做什么"
+    repository = FakeRepository(message)
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="",
+                finish_reason="tool_calls",
+                usage=ModelUsage(input_tokens=10, output_tokens=2),
+                tool_calls=(
+                    ModelToolCall(
+                        id="fallback-action",
+                        name="resolve_agent_action",
+                        arguments={"action": "chat"},
+                    ),
+                ),
+            ),
+            ModelResponse(
+                text="我可以帮你选设备、查库存和报价。",
+                finish_reason="stop",
+                usage=ModelUsage(input_tokens=12, output_tokens=3),
+            ),
+        ]
+    )
+    settings = Settings(_env_file=None, intent_pre_router_mode="enforce")
+    async with httpx.AsyncClient(base_url="http://localhost:8080") as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+        await coordinator._execute(
+            run_id="run-router-miss",
+            conversation_id="conversation-router-miss",
+            access_token="token",
+            message=message,
+            rental_period=None,
+        )
+
+    assert len(model.requests) == 2
+    event = next(payload for name, payload in repository.events if name == "action.resolution")
+    assert event == {
+        "source": "llm_tool_call",
+        "rule": None,
+        "actionModelCalled": True,
+    }
+
+
+async def test_enforced_pending_date_uses_existing_rental_resolver_and_policy() -> None:
+    product_id = "01J00000000000000000000101"
+    today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date()
+    start_date = today + timedelta(days=91)
+    end_date = start_date + timedelta(days=1)
+    message = f"{start_date.isoformat()} 到 {end_date.isoformat()}"
+    repository = FakeRepository(message)
+    repository.state = ConversationStateMemory(
+        None,
+        None,
+        None,
+        None,
+        PendingRentalAction(action="availability", product_id=product_id),
+        None,
+    )
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="",
+                finish_reason="tool_calls",
+                usage=ModelUsage(input_tokens=20, output_tokens=5),
+                tool_calls=(
+                    ModelToolCall(
+                        id="invalid-period",
+                        name="set_rental_period",
+                        arguments={
+                            "startDate": start_date.isoformat(),
+                            "endDate": end_date.isoformat(),
+                        },
+                    ),
+                ),
+            )
+        ]
+    )
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise AssertionError("invalid rental period must not reach RentFlow")
+
+    settings = Settings(_env_file=None, intent_pre_router_mode="enforce")
+    async with httpx.AsyncClient(
+        base_url="http://localhost:8080",
+        transport=httpx.MockTransport(handle),
+    ) as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+        await coordinator._execute(
+            run_id="run-invalid-pending-date",
+            conversation_id="conversation-invalid-pending-date",
+            access_token="token",
+            message=message,
+            rental_period=None,
+        )
+
+    assert len(model.requests) == 1
+    assert model.requests[0].tools[0].name == "set_rental_period"
+    assert requests == []
+    assert repository.remembered is None
+    assert repository.finalized is not None
+    assert repository.finalized["stop_reason"] == "NEED_CLARIFICATION"
+    assert repository.finalized["model_rounds"] == 1
+    assert (
+        "action.resolution",
+        {
+            "source": "deterministic",
+            "rule": "pending_date_supplement",
+            "actionModelCalled": False,
+        },
+    ) in repository.events
+
+
+async def test_enforced_pending_date_resolves_period_and_runs_availability() -> None:
+    product_id = "01J00000000000000000000101"
+    today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date()
+    start_date = today + timedelta(days=2)
+    end_date = start_date + timedelta(days=1)
+    message = f"{start_date.isoformat()} 到 {end_date.isoformat()}"
+    repository = FakeRepository(message)
+    repository.state = ConversationStateMemory(
+        None,
+        None,
+        None,
+        None,
+        PendingRentalAction(action="availability", product_id=product_id),
+        None,
+    )
+    model = SequenceModel(
+        [
+            ModelResponse(
+                text="",
+                finish_reason="tool_calls",
+                usage=ModelUsage(input_tokens=20, output_tokens=5),
+                tool_calls=(
+                    ModelToolCall(
+                        id="valid-period",
+                        name="set_rental_period",
+                        arguments={
+                            "startDate": start_date.isoformat(),
+                            "endDate": end_date.isoformat(),
+                        },
+                    ),
+                ),
+            )
+        ]
+    )
+    bodies: list[dict[str, object]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "productId": product_id,
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat(),
+                "available": True,
+                "availableCount": 1,
+                "checkedAt": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    settings = Settings(_env_file=None, intent_pre_router_mode="enforce")
+    async with httpx.AsyncClient(
+        base_url="http://localhost:8080",
+        transport=httpx.MockTransport(handle),
+    ) as rentflow_http:
+        coordinator = RunCoordinator(
+            settings,
+            repository,  # type: ignore[arg-type]
+            rentflow_http,
+            RenderedPrompt(version="test", content_hash="hash", content="system"),
+        )
+        coordinator._model = model
+        await coordinator._execute(
+            run_id="run-valid-pending-date",
+            conversation_id="conversation-valid-pending-date",
+            access_token="token",
+            message=message,
+            rental_period=None,
+        )
+
+    assert len(model.requests) == 1
+    assert model.requests[0].tools[0].name == "set_rental_period"
+    assert bodies == [
+        {
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "productId": product_id,
+        }
+    ]
+    assert repository.remembered == RentalPeriodInput(
+        start_date=start_date,
+        end_date=end_date,
+    )
+    assert repository.finalized is not None
+    assert repository.finalized["stop_reason"] == "COMPLETED"
+    assert repository.finalized["model_rounds"] == 1
+    assert repository.remembered_pending_rental_action is None
 
 
 async def test_new_product_search_does_not_replay_saved_scenario() -> None:
@@ -774,9 +1100,12 @@ async def test_changed_product_category_does_not_inherit_pending_use_case() -> N
 
 async def test_saved_valid_period_is_reused_for_availability() -> None:
     product_id = "01J00000000000000000000101"
+    today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date()
+    start_date = today + timedelta(days=2)
+    end_date = start_date + timedelta(days=2)
     period = RentalPeriodInput(
-        start_date=date(2026, 7, 20),
-        end_date=date(2026, 7, 22),
+        start_date=start_date,
+        end_date=end_date,
     )
     repository = FakeRepository("这台有货吗？")
     scenario_state = complete_scenario_state(period)
@@ -826,8 +1155,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
             200,
             json={
                 "productId": product_id,
-                "startDate": "2026-07-20",
-                "endDate": "2026-07-22",
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat(),
                 "available": True,
                 "availableCount": 2,
                 "checkedAt": "2026-07-15T08:00:00Z",
@@ -857,8 +1186,8 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
 
     assert bodies == [
         {
-            "startDate": "2026-07-20",
-            "endDate": "2026-07-22",
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
             "productId": product_id,
         }
     ]
@@ -871,14 +1200,17 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
         if event_type == "recommendation.presented"
     ]
     assert presentations[0]["rentalPeriod"] == {
-        "startDate": "2026-07-20",
-        "endDate": "2026-07-22",
+        "startDate": start_date.isoformat(),
+        "endDate": end_date.isoformat(),
     }
     assert presentations[0]["sections"][0]["products"][0]["availableCount"] == 2  # type: ignore[index]
 
 
 async def test_selected_product_survives_period_confirmation_rounds() -> None:
     product_id = "01J00000000000000000000101"
+    today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Shanghai")).date()
+    confirmed_start = today + timedelta(days=2)
+    confirmed_end = confirmed_start + timedelta(days=1)
     repository = FakeRepository("帮我看看第一个")
     settings = Settings(_env_file=None)
     first_model = SequenceModel(
@@ -999,8 +1331,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
                         id="confirmed-period",
                         name="set_rental_period",
                         arguments={
-                            "startDate": "2026-07-20",
-                            "endDate": "2026-07-21",
+                            "startDate": confirmed_start.isoformat(),
+                            "endDate": confirmed_end.isoformat(),
                         },
                     ),
                 ),
@@ -1015,8 +1347,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
             200,
             json={
                 "productId": product_id,
-                "startDate": "2026-07-20",
-                "endDate": "2026-07-21",
+                "startDate": confirmed_start.isoformat(),
+                "endDate": confirmed_end.isoformat(),
                 "available": True,
                 "availableCount": 1,
                 "checkedAt": "2026-07-15T09:00:00Z",
@@ -1044,8 +1376,8 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
 
     assert bodies == [
         {
-            "startDate": "2026-07-20",
-            "endDate": "2026-07-21",
+            "startDate": confirmed_start.isoformat(),
+            "endDate": confirmed_end.isoformat(),
             "productId": product_id,
         }
     ]

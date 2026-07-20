@@ -15,6 +15,7 @@ from gearmate.actions import (
 from gearmate.agent.graph import GearMateAgent
 from gearmate.catalog import CatalogSearchService
 from gearmate.config import Settings
+from gearmate.intent_router import IntentPreRouteDecision, IntentPreRouter
 from gearmate.llm.factory import build_chat_model
 from gearmate.llm.openai_compatible import ModelConfigurationError
 from gearmate.llm.port import ChatModelPort
@@ -67,6 +68,13 @@ class RunCoordinator:
         rental_period_policy = RentalPeriodPolicy(settings.rental_period_max_advance_days)
         self._rental_period_resolver = RentalPeriodResolver(rental_period_policy)
         self._action_resolver = AgentActionResolver(settings.equipment_roles)
+        self._intent_pre_router = IntentPreRouter(
+            pure_social_enabled=settings.intent_pre_router_pure_social_enabled,
+            pending_confirmation_enabled=(
+                settings.intent_pre_router_pending_confirmation_enabled
+            ),
+            pending_date_enabled=settings.intent_pre_router_pending_date_enabled,
+        )
         self._scenario_catalog = ScenarioCatalog.load_default()
         self._requirements_resolver = RentalRequirementsResolver(self._scenario_catalog)
 
@@ -146,48 +154,87 @@ class RunCoordinator:
             started = monotonic()
             context = await self._memory.build_context(conversation_id)
             effective_rental_period = rental_period or context.rental_period
-            action_resolution = await self._action_resolver.resolve(
-                message=message,
-                history=context.messages,
-                current_scenario_id=(
-                    context.rental_requirements.scenario_id
-                    if context.rental_requirements is not None
-                    else None
-                ),
-                pending_product_search=context.pending_product_search,
-                pending_rental_action=context.pending_rental_action,
-                model=model,
-                max_output_tokens=(self._settings.action_resolution_max_output_tokens),
-                recent_product_search_json=(
-                    context.recent_product_search.model_dump_json(by_alias=True)
-                    if context.recent_product_search is not None
-                    else "none"
-                ),
-                recent_product_ids=(
-                    tuple(
-                        item.product_id for item in context.recent_product_search.items
-                    )
-                    if context.recent_product_search is not None
-                    else ()
-                ),
-                catalog_vocabulary=(
-                    await self._catalog_search.vocabulary()
-                    if self._catalog_search is not None
-                    else None
-                ),
+            pre_route: IntentPreRouteDecision | None = None
+            if self._settings.intent_pre_router_mode != "off":
+                pre_route = self._intent_pre_router.resolve(
+                    message,
+                    pending_rental_action=context.pending_rental_action,
+                )
+
+            action_model_called = not (
+                self._settings.intent_pre_router_mode == "enforce" and pre_route is not None
             )
-            action_usage = action_resolution.usage
-            action_rounds = 1
-            if action_resolution.action is None:
+            clarification: str | None = None
+            if action_model_called:
+                action_resolution = await self._action_resolver.resolve(
+                    message=message,
+                    history=context.messages,
+                    current_scenario_id=(
+                        context.rental_requirements.scenario_id
+                        if context.rental_requirements is not None
+                        else None
+                    ),
+                    pending_product_search=context.pending_product_search,
+                    pending_rental_action=context.pending_rental_action,
+                    model=model,
+                    max_output_tokens=(self._settings.action_resolution_max_output_tokens),
+                    recent_product_search_json=(
+                        context.recent_product_search.model_dump_json(by_alias=True)
+                        if context.recent_product_search is not None
+                        else "none"
+                    ),
+                    recent_product_ids=(
+                        tuple(
+                            item.product_id for item in context.recent_product_search.items
+                        )
+                        if context.recent_product_search is not None
+                        else ()
+                    ),
+                    catalog_vocabulary=(
+                        await self._catalog_search.vocabulary()
+                        if self._catalog_search is not None
+                        else None
+                    ),
+                )
+                raw_action = action_resolution.action
+                clarification = action_resolution.clarification
+                action_usage = action_resolution.usage
+                action_rounds = 1
+            else:
+                assert pre_route is not None
+                raw_action = pre_route.action
+                action_usage = ModelUsage()
+                action_rounds = 0
+
+            if raw_action is None:
+                resolution_payload: dict[str, Any] = {
+                    "source": "llm_tool_call",
+                    "rule": None,
+                    "actionModelCalled": True,
+                }
+                if self._settings.intent_pre_router_mode == "shadow":
+                    resolution_payload.update(
+                        {
+                            "candidateRule": pre_route.rule if pre_route else None,
+                            "candidateAction": (
+                                pre_route.action.model_dump(mode="json", by_alias=True)
+                                if pre_route
+                                else None
+                            ),
+                            "llmAction": None,
+                            "matched": False if pre_route else None,
+                        }
+                    )
+                await write_event("action.resolution", resolution_payload)
                 await self._complete_clarification(
                     run_id=run_id,
-                    text=action_resolution.clarification or "请明确本轮希望执行的操作。",
+                    text=clarification or "请明确本轮希望执行的操作。",
                     usage=action_usage,
                     duration_ms=round((monotonic() - started) * 1000),
                     model_rounds=action_rounds,
                 )
                 return
-            action = action_resolution.action
+            action = raw_action
             action = merge_pending_product_search(
                 action,
                 context.pending_product_search,
@@ -196,6 +243,34 @@ class RunCoordinator:
                 action,
                 context.pending_rental_action,
             )
+            resolution_payload = {
+                "source": "llm_tool_call" if action_model_called else "deterministic",
+                "rule": pre_route.rule if not action_model_called and pre_route else None,
+                "actionModelCalled": action_model_called,
+            }
+            if self._settings.intent_pre_router_mode == "shadow":
+                candidate_action = None
+                if pre_route is not None:
+                    candidate_action = merge_pending_product_search(
+                        pre_route.action,
+                        context.pending_product_search,
+                    )
+                    candidate_action = merge_pending_rental_action(
+                        candidate_action,
+                        context.pending_rental_action,
+                    )
+                resolution_payload.update(
+                    {
+                        "candidateRule": pre_route.rule if pre_route else None,
+                        "candidateAction": (
+                            candidate_action.model_dump(mode="json", by_alias=True)
+                            if candidate_action
+                            else None
+                        ),
+                        "llmAction": action.model_dump(mode="json", by_alias=True),
+                        "matched": candidate_action == action if candidate_action else None,
+                    }
+                )
             if (
                 action.action not in ("chat", "product_search")
                 and context.pending_product_search is not None
@@ -240,6 +315,7 @@ class RunCoordinator:
                     conversation_id,
                     pending_rental_action,
                 )
+            await write_event("action.resolution", resolution_payload)
             await write_event(
                 "action.resolved",
                 action.model_dump(mode="json", by_alias=True),

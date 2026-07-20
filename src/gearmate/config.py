@@ -93,6 +93,10 @@ class Settings(BaseSettings):
     rental_period_extraction_max_output_tokens: int = 512
     requirements_extraction_max_output_tokens: int = 512
     rental_period_max_advance_days: int = 90
+    intent_pre_router_mode: Literal["off", "shadow", "enforce"] = "off"
+    intent_pre_router_pure_social_enabled: bool = True
+    intent_pre_router_pending_confirmation_enabled: bool = True
+    intent_pre_router_pending_date_enabled: bool = True
 
     @field_validator(
         "jwt_public_key_path",
