@@ -18,6 +18,7 @@ from gearmate.persistence.database import Database
 from gearmate.persistence.repositories import AgentRepository
 from gearmate.prompts.loader import load_system_prompt
 from gearmate.rentflow.client import RentFlowClient
+from gearmate.user_memory import UserMemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         database = Database(resolved_settings)
         repository = AgentRepository(database.session_factory)
+        user_memory_service = UserMemoryService(repository, resolved_settings)
         stale_before = datetime.now(UTC) - timedelta(
             seconds=resolved_settings.run_timeout_seconds * 2
         )
@@ -143,10 +145,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             rentflow_http,
             load_system_prompt(),
             catalog_search,
+            user_memory_service,
         )
         app.state.database = database
         app.state.repository = repository
         app.state.run_coordinator = run_coordinator
+        app.state.user_memory_service = user_memory_service
         app.state.catalog_search = catalog_search
         try:
             yield
@@ -173,7 +177,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=list(resolved_settings.allowed_origins),
         allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-Correlation-ID"],
         expose_headers=["X-Correlation-ID"],
     )

@@ -54,12 +54,16 @@ class ToolRegistry:
         max_concurrency: int,
         scenario_plan: ScenarioPlan | None = None,
         catalog_search: CatalogSearchService | None = None,
+        preferred_brands: tuple[str, ...] = (),
+        excluded_brands: tuple[str, ...] = (),
     ) -> None:
         self._rentflow = rentflow
         self._max_result_items = max_result_items
         self._max_concurrency = max_concurrency
         self._scenario_plan = scenario_plan
         self._catalog_search = catalog_search
+        self._preferred_brands = frozenset(brand.casefold() for brand in preferred_brands)
+        self._excluded_brands = frozenset(brand.casefold() for brand in excluded_brands)
         self._last_search_diagnostics: dict[str, Any] | None = None
         self._last_product_search_result: ProductSearchResult | None = None
         self._last_availability_result: AvailabilityResult | None = None
@@ -318,6 +322,7 @@ class ToolRegistry:
             try:
                 semantic_result = await self._semantic_products(request)
                 semantic_result = self._apply_price_preference(semantic_result, request)
+                semantic_result = self._apply_user_preferences(semantic_result, request)
                 if semantic_result.items:
                     self._last_product_search_result = semantic_result
                     return semantic_result
@@ -335,6 +340,7 @@ class ToolRegistry:
                 }
         result = await self._rentflow.search_products(request)
         result = self._apply_price_preference(result, request)
+        result = self._apply_user_preferences(result, request)
         diagnostics = self._last_search_diagnostics or {}
         self._last_search_diagnostics = {
             **diagnostics,
@@ -394,6 +400,39 @@ class ToolRegistry:
                     items,
                     key=lambda item: (
                         abs(Decimal(item.daily_rate) - target_daily_rate),
+                        original_positions[item.product_id],
+                    ),
+                )
+            )
+        if items == result.items:
+            return result
+        return result.model_copy(
+            update={
+                "items": items,
+                "total_elements": len(items),
+                "total_pages": 1 if items else 0,
+            }
+        )
+
+    def _apply_user_preferences(
+        self,
+        result: ProductSearchResult,
+        request: ProductSearchInput,
+    ) -> ProductSearchResult:
+        if request.brand is not None:
+            return result
+        items = result.items
+        if self._excluded_brands:
+            items = tuple(
+                item for item in items if item.brand.casefold() not in self._excluded_brands
+            )
+        if self._preferred_brands:
+            original_positions = {item.product_id: index for index, item in enumerate(items)}
+            items = tuple(
+                sorted(
+                    items,
+                    key=lambda item: (
+                        0 if item.brand.casefold() in self._preferred_brands else 1,
                         original_positions[item.product_id],
                     ),
                 )

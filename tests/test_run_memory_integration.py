@@ -255,6 +255,7 @@ async def test_run_resolves_and_remembers_natural_language_period() -> None:
         await coordinator._execute(
             run_id="run-1",
             conversation_id="conversation-1",
+            user_id="user-1",
             access_token="token",
             message=message,
             rental_period=None,
@@ -311,6 +312,7 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
         await coordinator._execute(
             run_id="run-search-clarification",
             conversation_id="conversation-specific-search",
+            user_id="user-1",
             access_token="token",
             message=first_message,
             rental_period=None,
@@ -413,6 +415,7 @@ async def test_pending_specific_search_survives_rental_period_clarification() ->
         await coordinator._execute(
             run_id="run-search-confirmed",
             conversation_id="conversation-specific-search",
+            user_id="user-1",
             access_token="token",
             message="对",
             rental_period=None,
@@ -476,6 +479,7 @@ async def test_run_clarifies_and_remembers_vague_live_streaming_request() -> Non
         await coordinator._execute(
             run_id="run-2",
             conversation_id="conversation-2",
+            user_id="user-1",
             access_token="token",
             message=message,
             rental_period=None,
@@ -573,6 +577,7 @@ async def test_thanks_does_not_replay_complete_saved_scenario() -> None:
         await coordinator._execute(
             run_id="run-chat",
             conversation_id="conversation-chat",
+            user_id="user-1",
             access_token="token",
             message="谢谢",
             rental_period=None,
@@ -616,6 +621,7 @@ async def test_enforced_pure_social_route_skips_only_the_action_model() -> None:
         await coordinator._execute(
             run_id="run-deterministic-chat",
             conversation_id="conversation-deterministic-chat",
+            user_id="user-1",
             access_token="token",
             message="谢谢",
             rental_period=None,
@@ -672,6 +678,7 @@ async def test_shadow_mode_records_candidate_but_uses_the_llm_action() -> None:
         await coordinator._execute(
             run_id="run-shadow-chat",
             conversation_id="conversation-shadow-chat",
+            user_id="user-1",
             access_token="token",
             message="谢谢",
             rental_period=None,
@@ -723,6 +730,7 @@ async def test_enforced_pre_router_miss_calls_the_action_model() -> None:
         await coordinator._execute(
             run_id="run-router-miss",
             conversation_id="conversation-router-miss",
+            user_id="user-1",
             access_token="token",
             message=message,
             rental_period=None,
@@ -792,6 +800,7 @@ async def test_enforced_pending_date_uses_existing_rental_resolver_and_policy() 
         await coordinator._execute(
             run_id="run-invalid-pending-date",
             conversation_id="conversation-invalid-pending-date",
+            user_id="user-1",
             access_token="token",
             message=message,
             rental_period=None,
@@ -879,6 +888,7 @@ async def test_enforced_pending_date_resolves_period_and_runs_availability() -> 
         await coordinator._execute(
             run_id="run-valid-pending-date",
             conversation_id="conversation-valid-pending-date",
+            user_id="user-1",
             access_token="token",
             message=message,
             rental_period=None,
@@ -967,6 +977,7 @@ async def test_new_product_search_does_not_replay_saved_scenario() -> None:
         await coordinator._execute(
             run_id="run-search",
             conversation_id="conversation-search",
+            user_id="user-1",
             access_token="token",
             message="有哪些相机可以租？",
             rental_period=None,
@@ -1066,6 +1077,7 @@ async def test_changed_product_category_does_not_inherit_pending_use_case() -> N
         await coordinator._execute(
             run_id="run-smartphone-search",
             conversation_id="conversation-category-change",
+            user_id="user-1",
             access_token="token",
             message="我想租手机",
             rental_period=None,
@@ -1179,6 +1191,7 @@ async def test_saved_valid_period_is_reused_for_availability() -> None:
         await coordinator._execute(
             run_id="run-availability",
             conversation_id="conversation-availability",
+            user_id="user-1",
             access_token="token",
             message="这台有货吗？",
             rental_period=None,
@@ -1243,6 +1256,7 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
         await coordinator._execute(
             run_id="run-select-first",
             conversation_id="conversation-confirm-period",
+            user_id="user-1",
             access_token="token",
             message="帮我看看第一个",
             rental_period=None,
@@ -1293,6 +1307,7 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
         await coordinator._execute(
             run_id="run-propose-period",
             conversation_id="conversation-confirm-period",
+            user_id="user-1",
             access_token="token",
             message=repository.message,
             rental_period=None,
@@ -1369,6 +1384,7 @@ async def test_selected_product_survives_period_confirmation_rounds() -> None:
         await coordinator._execute(
             run_id="run-confirm-period",
             conversation_id="conversation-confirm-period",
+            user_id="user-1",
             access_token="token",
             message=repository.message,
             rental_period=None,

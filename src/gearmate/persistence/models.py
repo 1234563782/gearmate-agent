@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -178,6 +179,87 @@ class ConversationSummary(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
+    )
+
+
+class UserMemory(Base):
+    __tablename__ = "user_memories"
+    __table_args__ = (
+        CheckConstraint(
+            "memory_type IN ('PREFERENCE', 'CONSTRAINT')",
+            name="ck_user_memories_type",
+        ),
+        CheckConstraint(
+            "memory_key IN ('preferred_brand', 'excluded_brand', "
+            "'preferred_equipment_role', 'preferred_use_case', 'language')",
+            name="ck_user_memories_key",
+        ),
+        CheckConstraint(
+            "capture_mode IN ('EXPLICIT', 'MODEL_EXTRACTED')",
+            name="ck_user_memories_capture_mode",
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'SUPERSEDED', 'DELETED', 'EXPIRED')",
+            name="ck_user_memories_status",
+        ),
+        Index("idx_user_memories_user_active_type", "user_id", "status", "memory_type"),
+        Index("idx_user_memories_user_key_updated", "user_id", "memory_key", "updated_at"),
+        Index("idx_user_memories_expires_at", "expires_at"),
+        Index(
+            "idx_user_memories_user_active_identity",
+            "user_id",
+            "status",
+            "value_identity_hash",
+        ),
+        Index(
+            "uq_user_memories_active_identity",
+            "user_id",
+            "memory_key",
+            "value_identity_hash",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    memory_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_identity_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    capture_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_conversation_id: Mapped[str | None] = mapped_column(
+        String(26),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+    )
+    source_run_id: Mapped[str | None] = mapped_column(
+        String(26),
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+    )
+    source_event_id: Mapped[str | None] = mapped_column(
+        String(26),
+        ForeignKey("run_events.id", ondelete="SET NULL"),
+    )
+    source_message_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
     )
 
 

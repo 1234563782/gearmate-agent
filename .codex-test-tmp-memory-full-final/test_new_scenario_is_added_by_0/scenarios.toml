@@ -1,0 +1,19 @@
+
+[[scenarios]]
+id = "podcast"
+name = "播客录制设备"
+aliases = ["播客"]
+
+[[scenarios.fields]]
+name = "guest_count"
+question = "有几位嘉宾"
+kind = "integer"
+required = true
+minimum = 1
+maximum = 10
+signals = ["嘉宾", "人"]
+
+[[scenarios.equipment]]
+role = "microphone"
+keyword = "麦克风"
+quantity_field = "guest_count"

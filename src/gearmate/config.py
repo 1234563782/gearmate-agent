@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     context_summary_max_output_tokens: int = 1024
     context_recent_messages: int = 8
     context_source_message_limit: int = 100
+    user_memory_enabled: bool = False
+    user_memory_mode: Literal["off", "shadow", "active"] = "off"
+    user_memory_retrieval_limit: int = 10
+    user_memory_max_items: int = 100
+    user_memory_min_confidence: float = 0.85
+    user_memory_retention_days: int = 180
+    user_memory_extraction_max_output_tokens: int = 256
     action_resolution_max_output_tokens: int = 256
     rental_period_extraction_max_output_tokens: int = 512
     requirements_extraction_max_output_tokens: int = 512
@@ -145,6 +152,7 @@ class Settings(BaseSettings):
         "semantic_search_min_score",
         "semantic_vector_weight",
         "semantic_lexical_weight",
+        "user_memory_min_confidence",
     )
     @classmethod
     def unit_interval(cls, value: float) -> float:
@@ -169,6 +177,10 @@ class Settings(BaseSettings):
         "context_summary_max_output_tokens",
         "context_recent_messages",
         "context_source_message_limit",
+        "user_memory_retrieval_limit",
+        "user_memory_max_items",
+        "user_memory_retention_days",
+        "user_memory_extraction_max_output_tokens",
         "action_resolution_max_output_tokens",
         "rental_period_extraction_max_output_tokens",
         "requirements_extraction_max_output_tokens",

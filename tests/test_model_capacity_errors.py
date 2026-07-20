@@ -86,6 +86,7 @@ async def test_run_persists_specific_model_capacity_error(
         await coordinator._execute(
             run_id="run-1",
             conversation_id="conversation-1",
+            user_id="user-1",
             access_token="token",
             message="search for a camera",
             rental_period=None,

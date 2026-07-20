@@ -43,6 +43,7 @@ from gearmate.resilience import (
 from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
+from gearmate.user_memory import UserMemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class RunCoordinator:
         rentflow_http: httpx.AsyncClient,
         prompt: RenderedPrompt,
         catalog_search: CatalogSearchService | None = None,
+        user_memory: UserMemoryService | None = None,
     ) -> None:
         self._settings = settings
         self._repository = repository
@@ -65,6 +67,7 @@ class RunCoordinator:
         self._model_lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._memory = ConversationMemoryService(repository, settings)
+        self._user_memory = user_memory or UserMemoryService(repository, settings)
         rental_period_policy = RentalPeriodPolicy(settings.rental_period_max_advance_days)
         self._rental_period_resolver = RentalPeriodResolver(rental_period_policy)
         self._action_resolver = AgentActionResolver(settings.equipment_roles)
@@ -103,6 +106,7 @@ class RunCoordinator:
             self._execute(
                 run_id=run.id,
                 conversation_id=conversation_id,
+                user_id=user_id,
                 access_token=access_token,
                 message=message,
                 rental_period=rental_period,
@@ -142,6 +146,7 @@ class RunCoordinator:
         *,
         run_id: str,
         conversation_id: str,
+        user_id: str,
         access_token: str,
         message: str,
         rental_period: RentalPeriodInput | None,
@@ -152,7 +157,11 @@ class RunCoordinator:
         try:
             model = await self._model_client()
             started = monotonic()
-            context = await self._memory.build_context(conversation_id)
+            context, user_memory_context = await asyncio.gather(
+                self._memory.build_context(conversation_id),
+                self._user_memory.build_context(user_id),
+            )
+            user_memory_prompt = user_memory_context.prompt_context()
             effective_rental_period = rental_period or context.rental_period
             pre_route: IntentPreRouteDecision | None = None
             if self._settings.intent_pre_router_mode != "off":
@@ -195,6 +204,7 @@ class RunCoordinator:
                         if self._catalog_search is not None
                         else None
                     ),
+                    user_memory_context=user_memory_prompt or "none",
                 )
                 raw_action = action_resolution.action
                 clarification = action_resolution.clarification
@@ -228,6 +238,10 @@ class RunCoordinator:
                 await write_event("action.resolution", resolution_payload)
                 await self._complete_clarification(
                     run_id=run_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message=message,
+                    model=model,
                     text=clarification or "请明确本轮希望执行的操作。",
                     usage=action_usage,
                     duration_ms=round((monotonic() - started) * 1000),
@@ -361,6 +375,10 @@ class RunCoordinator:
                 else:
                     await self._complete_clarification(
                         run_id=run_id,
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message=message,
+                        model=model,
                         text=resolution.clarification or "请确认完整的开始和结束时间。",
                         usage=self._combine_usage(action_usage, resolver_usage),
                         duration_ms=round((monotonic() - started) * 1000),
@@ -404,6 +422,10 @@ class RunCoordinator:
                     )
                     await self._complete_clarification(
                         run_id=run_id,
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message=message,
+                        model=model,
                         text=requirements_resolution.clarification or "请补充完整的设备租赁需求。",
                         usage=clarification_usage,
                         duration_ms=round((monotonic() - started) * 1000),
@@ -417,6 +439,8 @@ class RunCoordinator:
                 max_concurrency=self._settings.max_tool_concurrency,
                 scenario_plan=scenario_plan,
                 catalog_search=self._catalog_search,
+                preferred_brands=user_memory_context.preferred_brands,
+                excluded_brands=user_memory_context.excluded_brands,
             )
             agent = GearMateAgent(model, tools, self._settings, self._prompt)
             async with asyncio.timeout(self._settings.run_timeout_seconds):
@@ -428,6 +452,7 @@ class RunCoordinator:
                     action=action,
                     write_event=write_event,
                     timezone=context.timezone,
+                    user_memory_context=user_memory_prompt,
                 )
             if tools.last_search_diagnostics is not None:
                 await write_event("search.retrieval", tools.last_search_diagnostics)
@@ -532,13 +557,13 @@ class RunCoordinator:
                 model_rounds=model_rounds,
                 tool_call_count=result.tool_call_count,
             )
-            try:
-                await self._memory.maybe_summarize(conversation_id, model)
-            except Exception:
-                logger.exception(
-                    "Conversation summarization failed (conversation_id=%s)",
-                    conversation_id,
-                )
+            await self._after_successful_run(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                message=message,
+                model=model,
+            )
         except TimeoutError:
             await self._fail(run_id, "TIMEOUT", "RUN_TIMEOUT")
         except ModelConfigurationError:
@@ -560,6 +585,10 @@ class RunCoordinator:
         self,
         *,
         run_id: str,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+        model: ChatModelPort,
         text: str,
         usage: ModelUsage,
         duration_ms: int,
@@ -591,6 +620,53 @@ class RunCoordinator:
             model_rounds=model_rounds,
             tool_call_count=0,
         )
+        await self._after_successful_run(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+            message=message,
+            model=model,
+        )
+
+    async def _after_successful_run(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        run_id: str,
+        message: str,
+        model: ChatModelPort,
+    ) -> None:
+        try:
+            await self._memory.maybe_summarize(conversation_id, model)
+        except asyncio.CancelledError:
+            logger.info("Post-run processing cancelled (run_id=%s)", run_id)
+            return
+        except Exception:
+            logger.exception(
+                "Conversation summarization failed (conversation_id=%s)",
+                conversation_id,
+            )
+        try:
+            outcome = await self._user_memory.extract_and_store(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                message=message,
+                model=model,
+            )
+            if outcome is not None:
+                logger.info(
+                    "User memory extraction completed (run_id=%s, candidates=%d, stored=%d)",
+                    run_id,
+                    len(outcome.candidates),
+                    outcome.stored_count,
+                )
+        except asyncio.CancelledError:
+            logger.info("User memory extraction cancelled (run_id=%s)", run_id)
+            return
+        except Exception:
+            logger.exception("User memory extraction failed (run_id=%s)", run_id)
 
     @staticmethod
     def _combine_usage(*items: ModelUsage) -> ModelUsage:

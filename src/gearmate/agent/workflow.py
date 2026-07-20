@@ -59,6 +59,7 @@ class GearMateAgent:
         action: AgentAction,
         write_event: EventWriter,
         timezone: str = "Asia/Shanghai",
+        user_memory_context: str | None = None,
     ) -> AgentResult:
         facts = FactSnapshot()
         if action.max_daily_rate is not None:
@@ -80,6 +81,8 @@ class GearMateAgent:
             for need in scenario_plan.equipment_needs:
                 facts.add_constraint_count(need.quantity)
         messages = [ModelMessage(role="system", content=self._prompt.content)]
+        if user_memory_context:
+            messages.append(ModelMessage(role="system", content=user_memory_context))
         messages.extend(history)
         if not history or history[-1].role != "user" or history[-1].content != message:
             messages.append(ModelMessage(role="user", content=message))

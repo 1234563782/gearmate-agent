@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
@@ -18,14 +18,23 @@ from gearmate.memory import (
 from gearmate.persistence.models import (
     ACTIVE_RUN_STATUSES,
     AgentRun,
+    CatalogAlias,
     Conversation,
     ConversationState,
     ConversationSummary,
     RunEvent,
+    UserMemory,
 )
 from gearmate.requirements import RentalRequirements
 from gearmate.search import RecentProductSearch
 from gearmate.tools.contracts import RentalPeriodInput
+from gearmate.user_memory import (
+    MemoryKey,
+    MemoryStatus,
+    MemoryType,
+    UserMemoryRecord,
+    UserMemoryWrite,
+)
 
 
 class ActiveRunConflict(RuntimeError):
@@ -299,6 +308,335 @@ class AgentRepository:
                 )
                 for event in events
             ]
+
+    async def active_user_memories(
+        self,
+        user_id: str,
+        *,
+        now_utc: datetime,
+        limit: int,
+    ) -> list[UserMemoryRecord]:
+        async with self._sessions() as session:
+            memories = await session.scalars(
+                select(UserMemory)
+                .where(
+                    UserMemory.user_id == user_id,
+                    UserMemory.status == "ACTIVE",
+                    or_(UserMemory.expires_at.is_(None), UserMemory.expires_at > now_utc),
+                )
+                .order_by(UserMemory.updated_at.desc(), UserMemory.id.desc())
+                .limit(limit)
+            )
+            return [self._user_memory_record(memory) for memory in memories]
+
+    async def user_memory(
+        self,
+        user_id: str,
+        memory_id: str,
+        *,
+        now_utc: datetime,
+    ) -> UserMemoryRecord:
+        async with self._sessions() as session:
+            memory = await session.scalar(
+                select(UserMemory).where(
+                    UserMemory.id == memory_id,
+                    UserMemory.user_id == user_id,
+                    UserMemory.status == "ACTIVE",
+                    or_(UserMemory.expires_at.is_(None), UserMemory.expires_at > now_utc),
+                )
+            )
+            if memory is None:
+                raise LookupError("User memory not found")
+            return self._user_memory_record(memory)
+
+    async def canonical_user_memory_identity(
+        self,
+        memory_key: MemoryKey,
+        value: str,
+    ) -> str:
+        entity_type = {
+            "preferred_brand": "brand",
+            "excluded_brand": "brand",
+            "preferred_equipment_role": "equipment_role",
+            "preferred_use_case": "use_case",
+        }.get(memory_key)
+        if entity_type is None:
+            return value
+
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(CatalogAlias.alias, CatalogAlias.canonical_value)
+                .where(
+                    CatalogAlias.entity_type == entity_type,
+                    CatalogAlias.active.is_(True),
+                )
+                .order_by(CatalogAlias.alias, CatalogAlias.canonical_value)
+            )
+            folded = value.casefold()
+            for alias, canonical_value in rows:
+                canonical = str(canonical_value)
+                if str(alias).casefold() == folded or canonical.casefold() == folded:
+                    return canonical
+        return value
+
+    async def upsert_user_memory(self, memory: UserMemoryWrite) -> UserMemoryRecord:
+        now = datetime.now(UTC)
+        async with self._sessions.begin() as session:
+            await self._lock_user_memories(session, memory.user_id)
+            await self._expire_user_memories(session, memory.user_id, now)
+            await self._supersede_user_memory_conflicts(session, memory, now)
+            stored = await self._upsert_user_memory_in_session(session, memory, now)
+            return self._user_memory_record(stored)
+
+    async def forget_user_memory(
+        self,
+        user_id: str,
+        memory_key: MemoryKey,
+        value_identity_hash: str,
+        *,
+        forgotten_at: datetime,
+    ) -> int:
+        async with self._sessions.begin() as session:
+            await self._lock_user_memories(session, user_id)
+            await self._expire_user_memories(session, user_id, forgotten_at)
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(UserMemory)
+                    .where(
+                        UserMemory.user_id == user_id,
+                        UserMemory.memory_key == memory_key,
+                        UserMemory.value_identity_hash == value_identity_hash,
+                        UserMemory.status == "ACTIVE",
+                    )
+                    .values(
+                        status="DELETED",
+                        valid_to=forgotten_at,
+                        updated_at=forgotten_at,
+                    )
+                ),
+            )
+            return int(result.rowcount or 0)
+
+    async def replace_user_memory(
+        self,
+        user_id: str,
+        memory_id: str,
+        replacement: UserMemoryWrite,
+    ) -> UserMemoryRecord:
+        now = datetime.now(UTC)
+        async with self._sessions.begin() as session:
+            await self._lock_user_memories(session, user_id)
+            await self._expire_user_memories(session, user_id, now)
+            current = await session.scalar(
+                select(UserMemory)
+                .where(
+                    UserMemory.id == memory_id,
+                    UserMemory.user_id == user_id,
+                    UserMemory.status == "ACTIVE",
+                )
+                .with_for_update()
+            )
+            if current is None:
+                raise LookupError("User memory not found")
+            current.status = "SUPERSEDED"
+            current.valid_to = now
+            current.updated_at = now
+            await session.flush()
+            await self._supersede_user_memory_conflicts(session, replacement, now)
+            stored = await self._upsert_user_memory_in_session(session, replacement, now)
+            return self._user_memory_record(stored)
+
+    async def delete_user_memory(self, user_id: str, memory_id: str) -> bool:
+        now = datetime.now(UTC)
+        async with self._sessions.begin() as session:
+            await self._lock_user_memories(session, user_id)
+            await self._expire_user_memories(session, user_id, now)
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(UserMemory)
+                    .where(
+                        UserMemory.id == memory_id,
+                        UserMemory.user_id == user_id,
+                        UserMemory.status == "ACTIVE",
+                    )
+                    .values(status="DELETED", valid_to=now, updated_at=now)
+                ),
+            )
+            return bool(result.rowcount)
+
+    async def delete_user_memories(self, user_id: str) -> int:
+        now = datetime.now(UTC)
+        async with self._sessions.begin() as session:
+            await self._lock_user_memories(session, user_id)
+            await self._expire_user_memories(session, user_id, now)
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(UserMemory)
+                    .where(UserMemory.user_id == user_id, UserMemory.status == "ACTIVE")
+                    .values(status="DELETED", valid_to=now, updated_at=now)
+                ),
+            )
+            return int(result.rowcount or 0)
+
+    async def user_message_event_id(self, run_id: str) -> str | None:
+        async with self._sessions() as session:
+            return cast(
+                str | None,
+                await session.scalar(
+                    select(RunEvent.id)
+                    .where(RunEvent.run_id == run_id, RunEvent.event_type == "user.message")
+                    .order_by(RunEvent.sequence_no)
+                    .limit(1)
+                ),
+            )
+
+    @staticmethod
+    async def _lock_user_memories(session: AsyncSession, user_id: str) -> None:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:user_id, 0))"),
+            {"user_id": user_id},
+        )
+
+    @staticmethod
+    async def _supersede_user_memory_conflicts(
+        session: AsyncSession,
+        memory: UserMemoryWrite,
+        now: datetime,
+    ) -> None:
+        conflicting_keys: tuple[str, ...] = ()
+        if memory.memory_key == "language":
+            conflicting_keys = ("language",)
+        elif memory.memory_key == "preferred_brand":
+            conflicting_keys = ("excluded_brand",)
+        elif memory.memory_key == "excluded_brand":
+            conflicting_keys = ("preferred_brand",)
+        if not conflicting_keys:
+            return
+        conditions = [
+            UserMemory.user_id == memory.user_id,
+            UserMemory.status == "ACTIVE",
+            UserMemory.memory_key.in_(conflicting_keys),
+        ]
+        if memory.memory_key == "language":
+            conditions.append(UserMemory.normalized_hash != memory.normalized_hash)
+        else:
+            conditions.append(UserMemory.value_identity_hash == memory.value_identity_hash)
+        await session.execute(
+            update(UserMemory)
+            .where(*conditions)
+            .values(status="SUPERSEDED", valid_to=now, updated_at=now)
+        )
+
+    @staticmethod
+    async def _upsert_user_memory_in_session(
+        session: AsyncSession,
+        memory: UserMemoryWrite,
+        now: datetime,
+    ) -> UserMemory:
+        insert_statement = pg_insert(UserMemory).values(
+            id=new_ulid(),
+            user_id=memory.user_id,
+            memory_type=memory.memory_type,
+            memory_key=memory.memory_key,
+            value={"text": memory.value},
+            summary=memory.summary,
+            normalized_hash=memory.normalized_hash,
+            value_identity_hash=memory.value_identity_hash,
+            capture_mode=memory.capture_mode,
+            confidence=memory.confidence,
+            status="ACTIVE",
+            source_conversation_id=memory.source_conversation_id,
+            source_run_id=memory.source_run_id,
+            source_event_id=memory.source_event_id,
+            source_message_hash=memory.source_message_hash,
+            source_created_at=memory.source_created_at,
+            valid_from=memory.valid_from,
+            last_confirmed_at=memory.source_created_at,
+            expires_at=memory.expires_at,
+            created_at=now,
+            updated_at=now,
+        )
+        upsert_statement = insert_statement.on_conflict_do_update(
+            index_elements=[
+                UserMemory.user_id,
+                UserMemory.memory_key,
+                UserMemory.value_identity_hash,
+            ],
+            index_where=UserMemory.status == "ACTIVE",
+            set_={
+                "memory_type": insert_statement.excluded.memory_type,
+                "value": insert_statement.excluded.value,
+                "summary": insert_statement.excluded.summary,
+                "normalized_hash": insert_statement.excluded.normalized_hash,
+                "capture_mode": insert_statement.excluded.capture_mode,
+                "confidence": func.greatest(
+                    UserMemory.confidence,
+                    insert_statement.excluded.confidence,
+                ),
+                "source_conversation_id": insert_statement.excluded.source_conversation_id,
+                "source_run_id": insert_statement.excluded.source_run_id,
+                "source_event_id": insert_statement.excluded.source_event_id,
+                "source_message_hash": insert_statement.excluded.source_message_hash,
+                "source_created_at": insert_statement.excluded.source_created_at,
+                "last_confirmed_at": insert_statement.excluded.last_confirmed_at,
+                "expires_at": insert_statement.excluded.expires_at,
+                "updated_at": now,
+            },
+        ).returning(UserMemory)
+        stored = cast(UserMemory | None, await session.scalar(upsert_statement))
+        if stored is None:
+            raise RuntimeError("Failed to store user memory")
+        return stored
+
+    @staticmethod
+    async def _expire_user_memories(
+        session: AsyncSession,
+        user_id: str,
+        now: datetime,
+    ) -> None:
+        await session.execute(
+            update(UserMemory)
+            .where(
+                UserMemory.user_id == user_id,
+                UserMemory.status == "ACTIVE",
+                UserMemory.expires_at.is_not(None),
+                UserMemory.expires_at <= now,
+            )
+            .values(
+                status="EXPIRED",
+                valid_to=UserMemory.expires_at,
+                updated_at=now,
+            )
+        )
+
+    @staticmethod
+    def _user_memory_record(memory: UserMemory) -> UserMemoryRecord:
+        return UserMemoryRecord(
+            id=memory.id,
+            user_id=memory.user_id,
+            memory_type=cast(MemoryType, memory.memory_type),
+            memory_key=cast(MemoryKey, memory.memory_key),
+            value=str(memory.value.get("text") or ""),
+            summary=memory.summary,
+            value_identity_hash=memory.value_identity_hash,
+            capture_mode=memory.capture_mode,
+            confidence=float(memory.confidence),
+            status=cast(MemoryStatus, memory.status),
+            source_conversation_id=memory.source_conversation_id,
+            source_run_id=memory.source_run_id,
+            source_event_id=memory.source_event_id,
+            source_message_hash=memory.source_message_hash,
+            source_created_at=memory.source_created_at,
+            valid_from=memory.valid_from,
+            last_confirmed_at=memory.last_confirmed_at,
+            valid_to=memory.valid_to,
+            expires_at=memory.expires_at,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+        )
 
     async def upsert_conversation_rental_period(
         self,

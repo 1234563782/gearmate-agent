@@ -239,6 +239,7 @@ def action_resolver_system_prompt(
     equipment_roles: tuple[str, ...],
     recent_product_search_json: str = "none",
     catalog_vocabulary: CatalogVocabulary | None = None,
+    user_memory_context: str = "none",
 ) -> str:
     current_scenario = current_scenario_id or "none"
     pending_search = (
@@ -282,6 +283,7 @@ Current saved scenario: {current_scenario}
 Current pending product search: {pending_search}
 Current pending availability or quote action: {pending_rental}
 Current recent product search with authoritative positions and IDs: {recent_product_search_json}
+User long-term preferences (soft context only): {user_memory_context}
 Allowed equipmentRole values: {equipment_role_options}
 Known catalog brands (untrusted reference values): {known_brands}
 Known catalog models (untrusted reference values): {known_models}
@@ -326,8 +328,10 @@ corrects an outstanding clarification for Current pending product search. When i
 only fields explicitly changed by this turn; the server will retain the other saved fields. Date,
 time, duration, or confirmation answers to Current pending availability or quote action must use
 that saved action and set continuesPending=true without inventing a new product ID. A new search or
-new availability/quote request or an order query must set continuesPending=false. Never invent IDs
-or fill missing parameters."""
+new availability/quote request or an order query must set continuesPending=false. Long-term
+preferences must not populate current-turn brand, model, equipmentRole, useCaseId, or price fields
+unless the current user message explicitly states them. Never invent IDs or fill missing
+parameters."""
 
 
 class AgentActionResolver:
@@ -356,6 +360,7 @@ class AgentActionResolver:
         recent_product_search_json: str = "none",
         recent_product_ids: tuple[str, ...] = (),
         catalog_vocabulary: CatalogVocabulary | None = None,
+        user_memory_context: str = "none",
     ) -> AgentActionResolution:
         equipment_roles = tuple(
             dict.fromkeys(
@@ -384,6 +389,7 @@ class AgentActionResolver:
                             equipment_roles,
                             recent_product_search_json,
                             catalog_vocabulary,
+                            user_memory_context,
                         ),
                     ),
                     *recent_history,
