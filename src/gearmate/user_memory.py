@@ -30,7 +30,7 @@ MEMORY_EXTRACTION_TOOL = "extract_user_memories"
 INTERNAL_ID = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 DATE_OR_MONEY = re.compile(
     r"(?:\b\d{4}-\d{1,2}-\d{1,2}\b|[$¥]|\b(?:USD|EUR|CNY|RMB)\b|"
-    r"\b(?:price|budget|deposit|inventory)\b)",
+    r"\b(?:price|budget|inventory)\b)",
     re.IGNORECASE,
 )
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")

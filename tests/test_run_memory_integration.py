@@ -262,8 +262,6 @@ async def test_changed_product_category_does_not_inherit_pending_use_case() -> N
                         "name": "iPhone 15 Pro Max",
                         "brand": "Apple",
                         "model": "iPhone 15 Pro Max",
-                        "dailyRate": "0.00",
-                        "fixedDeposit": "0.00",
                     }
                 ],
                 "page": 0,
@@ -313,8 +311,6 @@ async def test_product_search_remembers_authoritative_result_positions() -> None
                         "name": "Sony A7M4",
                         "brand": "Sony",
                         "model": "A7M4",
-                        "dailyRate": "0.00",
-                        "fixedDeposit": "0.00",
                     }
                 ],
                 "page": 0,

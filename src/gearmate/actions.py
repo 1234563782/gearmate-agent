@@ -276,7 +276,7 @@ Choose one action based on meaning, in any user language:
   SKU and quantity choices but never places or pays an order.
 - order_list: view or list the current signed-in user's orders. Use orderStatus only when the user
   explicitly asks for pending payment, paid, shipped, received, cancelled, or closed orders.
-  Never request or invent a user ID, and never expose internal order or reservation IDs.
+  Never request or invent a user ID, and never expose internal order IDs.
 - order_detail: inspect one exact commerce order. Include orderId only when supplied by a trusted
   structured client context; never copy or invent an ID from assistant-visible prose.
 
