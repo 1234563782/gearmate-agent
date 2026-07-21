@@ -49,16 +49,16 @@ def test_specific_model_keyword_is_preserved() -> None:
     assert plan.brand == "Apple"
 
 
-def test_target_daily_rate_is_preserved_for_server_side_ranking() -> None:
+def test_target_purchase_price_is_preserved_for_server_side_ranking() -> None:
     plan = ProductSearchPlanner().plan(
         AgentAction(
             action="product_search",
             equipment_role="laptop",
-            target_daily_rate="150",
+            target_price="8000",
         )
     )
 
-    assert plan.target_daily_rate == 150
+    assert plan.target_price == 8000
 
 
 @pytest.mark.parametrize("field", ("brand", "model"))

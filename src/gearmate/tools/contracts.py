@@ -1,12 +1,9 @@
-from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
-
-from gearmate.requirements import EquipmentRole
 
 
 class ToolModel(BaseModel):
@@ -18,21 +15,6 @@ class ToolModel(BaseModel):
     )
 
 
-class RentalPeriodInput(ToolModel):
-    start_date: date
-    end_date: date
-
-    @model_validator(mode="after")
-    def validate_period(self) -> "RentalPeriodInput":
-        if self.end_date < self.start_date:
-            raise ValueError("end_date must not be before start_date")
-        return self
-
-    @property
-    def billing_days(self) -> int:
-        return (self.end_date - self.start_date).days + 1
-
-
 class ProductSearchInput(ToolModel):
     keyword: str | None = Field(default=None, max_length=128)
     equipment_role: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
@@ -41,9 +23,8 @@ class ProductSearchInput(ToolModel):
     semantic_query: str | None = Field(default=None, max_length=512)
     use_case_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-    rental_period: RentalPeriodInput | None = None
-    max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
-    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
+    max_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
     page: int = Field(default=0, ge=0)
     size: int = Field(default=20, ge=1, le=100)
 
@@ -70,10 +51,8 @@ class ProductSummary(ToolModel):
     name: str
     brand: str
     model: str
-    daily_rate: str
-    fixed_deposit: str
-    available_count: int | None = Field(default=None, ge=0)
     use_cases: tuple[ProductUseCase, ...] = ()
+    store_skus: tuple["StoreSku", ...] = ()
 
 
 class ProductDetail(ToolModel):
@@ -84,9 +63,31 @@ class ProductDetail(ToolModel):
     brand: str
     model: str
     description: str
-    daily_rate: str
-    fixed_deposit: str
     use_cases: tuple[ProductUseCase, ...] = ()
+
+
+class StoreSku(ToolModel):
+    sku_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    sku_code: str
+    sku_name: str
+    specs: dict[str, object]
+    sale_price: str
+    available_quantity: int = Field(ge=0)
+    enabled: bool
+
+
+class StoreSkuListInput(ToolModel):
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+class StoreSkuInput(ToolModel):
+    sku_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+class StoreSkuList(ToolModel):
+    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    items: tuple[StoreSku, ...]
 
 
 class ProductDetailInput(ToolModel):
@@ -101,102 +102,59 @@ class ProductSearchResult(ToolModel):
     total_pages: int = Field(ge=0)
 
 
-class ScenarioKitInput(ToolModel):
-    rental_period: RentalPeriodInput | None = None
-
-
-class ScenarioKitItem(ToolModel):
-    role: EquipmentRole
-    quantity: int = Field(ge=1, le=8)
-    product: ProductSummary
-    subtotal_daily_rate: str
-
-
-class ScenarioKitResult(ToolModel):
-    scenario: str
-    items: tuple[ScenarioKitItem, ...]
-    total_daily_rate: str
-    max_daily_budget: str
-    within_budget: bool
-    availability_checked: bool
-    missing_roles: tuple[EquipmentRole, ...] = ()
-
-
-class AvailabilityInput(RentalPeriodInput):
-    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-
-class AvailabilityResult(ToolModel):
-    product_id: str
-    start_date: date
-    end_date: date
-    available: bool
-    available_count: int = Field(ge=0)
-    checked_at: datetime
-
-
-class QuoteInput(RentalPeriodInput):
-    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-
-class PriceSnapshot(ToolModel):
-    currency: str
-    pricing_version: int = Field(ge=1)
-    pricing_rule: str
-    billing_days: int = Field(ge=1)
-    daily_rate: str
-    rental_amount: str
-    deposit_amount: str
-    total_amount: str
-    rounding_mode: str
-
-
-class QuoteResult(ToolModel):
-    quote_id: str
-    product_id: str
-    start_date: date
-    end_date: date
-    expires_at: datetime
-    price_snapshot: PriceSnapshot
-
-
-OrderStatus = Literal[
-    "PENDING_CONFIRMATION",
-    "CONFIRMED",
+StoreOrderStatus = Literal[
+    "PENDING_PAYMENT",
+    "PAID",
+    "SHIPPED",
     "RECEIVED",
     "CANCELLED",
-    "EXPIRED",
+    "CLOSED",
 ]
 
 
-class OrderListInput(ToolModel):
-    status: OrderStatus | None = None
+class StoreOrderListInput(ToolModel):
+    status: StoreOrderStatus | None = None
     page: int = Field(default=0, ge=0)
     size: int = Field(default=5, ge=1, le=20)
 
 
-class OrderSummary(ToolModel):
+class StoreOrderDetailInput(ToolModel):
     order_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-    source_reservation_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+class StoreOrderItem(ToolModel):
+    order_item_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    sku_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_name: str
-    product_model: str
-    equipment_display_code: str | None
-    status: OrderStatus
-    effective_status: OrderStatus
-    start_date: date
-    end_date: date
-    expires_at: datetime
-    price_snapshot: PriceSnapshot
+    sku_name: str
+    specs: dict[str, object]
+    unit_price: str
+    quantity: int = Field(ge=1)
+    subtotal: str
+
+
+class StoreOrder(ToolModel):
+    order_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    status: StoreOrderStatus
+    currency: str
+    item_amount: str
+    shipping_amount: str
+    payable_amount: str
+    payment_expires_at: datetime
     created_at: datetime
-    confirmed_at: datetime | None
+    paid_at: datetime | None
+    shipped_at: datetime | None
     received_at: datetime | None
     cancelled_at: datetime | None
-    expired_at: datetime | None
+    closed_at: datetime | None
+    carrier: str | None
+    tracking_number: str | None
+    items: tuple[StoreOrderItem, ...]
 
 
-class OrderPage(ToolModel):
-    items: tuple[OrderSummary, ...]
+class StoreOrderPage(ToolModel):
+    items: tuple[StoreOrder, ...]
     page: int = Field(ge=0)
     size: int = Field(ge=1)
     total_elements: int = Field(ge=0)
@@ -205,18 +163,3 @@ class OrderPage(ToolModel):
 
 class CatalogSearchTool(Protocol):
     async def search_products(self, request: ProductSearchInput) -> ProductSearchResult: ...
-
-
-class AvailabilityTool(Protocol):
-    async def search_availability(self, request: AvailabilityInput) -> AvailabilityResult: ...
-
-
-class QuoteTool(Protocol):
-    async def create_quote(self, request: QuoteInput) -> QuoteResult: ...
-
-
-@dataclass(frozen=True, slots=True)
-class ToolPorts:
-    catalog: CatalogSearchTool
-    availability: AvailabilityTool
-    quote: QuoteTool

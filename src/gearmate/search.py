@@ -22,8 +22,6 @@ class RecentProductReference(BaseModel):
     brand: str
     model: str
     equipment_role: str
-    daily_rate: str | None = None
-    fixed_deposit: str | None = None
     use_cases: tuple[ProductUseCase, ...] = ()
 
 
@@ -48,8 +46,6 @@ class RecentProductSearch(BaseModel):
                     brand=item.brand,
                     model=item.model,
                     equipment_role=item.equipment_role,
-                    daily_rate=item.daily_rate,
-                    fixed_deposit=item.fixed_deposit,
                     use_cases=item.use_cases,
                 )
                 for index, item in enumerate(result.items, start=1)
@@ -66,8 +62,8 @@ class ProductSearchPlan:
     semantic_query: str | None
     use_case_id: str | None
     category_id: str | None
-    max_daily_rate: Decimal | None
-    target_daily_rate: Decimal | None
+    max_price: Decimal | None
+    target_price: Decimal | None
 
 
 class ProductSearchPlanner:
@@ -85,6 +81,6 @@ class ProductSearchPlanner:
             semantic_query=action.semantic_query,
             use_case_id=action.use_case_id,
             category_id=action.category_id,
-            max_daily_rate=action.max_daily_rate,
-            target_daily_rate=action.target_daily_rate,
+            max_price=action.max_price,
+            target_price=action.target_price,
         )

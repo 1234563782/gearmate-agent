@@ -113,8 +113,6 @@ class FakeRentFlowCatalog:
                     name="MacBook Pro 14",
                     brand="Apple",
                     model="MacBook Pro 14",
-                    daily_rate="160.00",
-                    fixed_deposit="1200.00",
                 ),
             ),
             page=0,
@@ -132,8 +130,6 @@ class FakeRentFlowCatalog:
             brand="Apple",
             model="MacBook Pro 14",
             description="Portable computer for video editing",
-            daily_rate="160.00",
-            fixed_deposit="1200.00",
             use_cases=(
                 ProductUseCase(
                     id="01J00000000000000000000202",

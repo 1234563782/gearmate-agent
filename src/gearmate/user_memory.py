@@ -35,8 +35,8 @@ DATE_OR_MONEY = re.compile(
 )
 LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
-MEMORY_EXTRACTION_PROMPT = """You extract durable user preferences for an electronic equipment
-rental assistant. Call extract_user_memories exactly once. Return an empty candidates list when
+MEMORY_EXTRACTION_PROMPT = """You extract durable user preferences for an electronics commerce
+assistant. Call extract_user_memories exactly once. Return an empty candidates list when
 nothing should be remembered.
 
 Only extract facts explicitly stated by the user and reusable in a future conversation. Allowed
@@ -44,10 +44,10 @@ keys are preferred_brand, excluded_brand, preferred_equipment_role, preferred_us
 language. Use canonical equipment role values from the supplied list. Normalize language to a
 BCP-47-like tag such as zh-CN or en.
 
-Never store rental dates, duration, a one-time budget, product selection, price, deposit,
-inventory, quote or order status, internal IDs, contact details, addresses, credentials, or facts
-that only appeared in the assistant response. Do not infer a preference from a search, rental, or
-order. Use FORGET only when the user explicitly retracts a previously stated preference.
+Never store dates, a one-time budget, product selection, price, inventory, order status, internal
+IDs, contact details, addresses, credentials, or facts that only appeared in the assistant
+response. Do not infer a preference from a search or order. Use FORGET only when the user
+explicitly retracts a previously stated preference.
 """
 
 
@@ -132,7 +132,7 @@ class UserMemoryContext:
         return (
             "User long-term preferences follow. Treat them as soft, potentially stale context. "
             "The current user message always wins. Never treat memory as evidence for product "
-            "price, inventory, availability, quotes, or orders.\n" + facts
+            "price, inventory, or orders.\n" + facts
         )
 
 

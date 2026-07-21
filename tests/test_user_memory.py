@@ -355,8 +355,6 @@ def product(product_id: str, brand: str) -> ProductSummary:
         name=f"{brand} Camera",
         brand=brand,
         model=f"{brand}-1",
-        daily_rate="100.00",
-        fixed_deposit="500.00",
     )
 
 

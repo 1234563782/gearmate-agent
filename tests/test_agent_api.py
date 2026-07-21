@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from gearmate.api.agent import list_conversation_messages
+from gearmate.api.agent import CreateRunRequest, list_conversation_messages
 from gearmate.auth.jwt import CurrentUser
 from gearmate.memory import ConversationMessageMemory
 
@@ -27,7 +27,7 @@ async def test_list_conversation_messages_returns_owned_history() -> None:
         ConversationMessageMemory(
             event_id="event-1",
             role="user",
-            content="我想租相机",
+            content="我想买相机",
             created_at=created_at,
         ),
         ConversationMessageMemory(
@@ -46,7 +46,7 @@ async def test_list_conversation_messages_returns_owned_history() -> None:
         {
             "id": "event-1",
             "role": "user",
-            "content": "我想租相机",
+            "content": "我想买相机",
                 "createdAt": created_at,
                 "presentation": None,
         },
@@ -58,6 +58,12 @@ async def test_list_conversation_messages_returns_owned_history() -> None:
                 "presentation": None,
         },
     ]
+
+
+def test_create_run_contract_has_no_rental_period() -> None:
+    schema = CreateRunRequest.model_json_schema(by_alias=True)
+
+    assert set(schema["properties"]) == {"message"}
 
 
 @pytest.mark.asyncio

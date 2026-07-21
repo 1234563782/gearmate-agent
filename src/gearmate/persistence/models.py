@@ -1,10 +1,9 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
-    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -133,8 +132,6 @@ class ConversationState(Base):
         ForeignKey("conversations.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    rental_start_date: Mapped[date | None] = mapped_column(Date)
-    rental_end_date: Mapped[date | None] = mapped_column(Date)
     attributes: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

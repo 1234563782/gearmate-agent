@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     embedding_model_id: str | None = None
     embedding_api_key: SecretStr | None = None
     embedding_dimensions: int = 1024
-    embedding_batch_size: int = 32
+    embedding_batch_size: int = 10
     embedding_max_concurrency: int = 2
     embedding_online_max_concurrency: int = 2
     embedding_refresh_max_concurrency: int = 1
@@ -97,13 +97,8 @@ class Settings(BaseSettings):
     user_memory_retention_days: int = 180
     user_memory_extraction_max_output_tokens: int = 256
     action_resolution_max_output_tokens: int = 256
-    rental_period_extraction_max_output_tokens: int = 512
-    requirements_extraction_max_output_tokens: int = 512
-    rental_period_max_advance_days: int = 90
     intent_pre_router_mode: Literal["off", "shadow", "enforce"] = "off"
     intent_pre_router_pure_social_enabled: bool = True
-    intent_pre_router_pending_confirmation_enabled: bool = True
-    intent_pre_router_pending_date_enabled: bool = True
 
     @field_validator(
         "jwt_public_key_path",
@@ -182,9 +177,6 @@ class Settings(BaseSettings):
         "user_memory_retention_days",
         "user_memory_extraction_max_output_tokens",
         "action_resolution_max_output_tokens",
-        "rental_period_extraction_max_output_tokens",
-        "requirements_extraction_max_output_tokens",
-        "rental_period_max_advance_days",
         "embedding_dimensions",
         "embedding_batch_size",
         "semantic_search_top_k",

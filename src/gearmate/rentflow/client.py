@@ -3,16 +3,18 @@ from typing import Any
 import httpx
 
 from gearmate.tools.contracts import (
-    AvailabilityInput,
-    AvailabilityResult,
     CatalogUseCase,
-    OrderListInput,
-    OrderPage,
     ProductDetail,
     ProductSearchInput,
     ProductSearchResult,
-    QuoteInput,
-    QuoteResult,
+    StoreOrder,
+    StoreOrderDetailInput,
+    StoreOrderListInput,
+    StoreOrderPage,
+    StoreSku,
+    StoreSkuInput,
+    StoreSkuList,
+    StoreSkuListInput,
 )
 
 
@@ -36,45 +38,45 @@ class RentFlowClient:
             "model": request.model,
             "useCaseId": request.use_case_id,
             "categoryId": request.category_id,
-            "maxDailyRate": request.max_daily_rate,
             "page": request.page,
             "size": request.size,
         }
-        if request.rental_period is not None:
-            params["startDate"] = request.rental_period.start_date.isoformat()
-            params["endDate"] = request.rental_period.end_date.isoformat()
         response = await self._client.get(
             "/api/v1/products",
             params={key: value for key, value in params.items() if value is not None},
         )
-        return ProductSearchResult.model_validate(self._payload(response))
+        payload = self._payload(response)
+        if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+            payload = {
+                **payload,
+                "items": [self._commerce_product(item) for item in payload["items"]],
+            }
+        return ProductSearchResult.model_validate(payload)
 
     async def list_use_cases(self) -> tuple[CatalogUseCase, ...]:
         response = await self._client.get("/api/v1/catalog/use-cases")
         return tuple(CatalogUseCase.model_validate(item) for item in self._payload(response))
 
-    async def search_availability(self, request: AvailabilityInput) -> AvailabilityResult:
-        response = await self._client.post(
-            "/api/v1/availability/search",
-            json=request.model_dump(mode="json", by_alias=True),
-        )
-        return AvailabilityResult.model_validate(self._payload(response))
-
     async def get_product(self, product_id: str) -> ProductDetail:
         response = await self._client.get(f"/api/v1/products/{product_id}")
-        return ProductDetail.model_validate(self._payload(response))
+        return ProductDetail.model_validate(self._commerce_product(self._payload(response)))
 
-    async def create_quote(self, request: QuoteInput) -> QuoteResult:
-        response = await self._client.post(
-            "/api/v1/quotes",
-            json=request.model_dump(mode="json", by_alias=True),
-            headers={"Authorization": f"Bearer {self._access_token}"},
-        )
-        return QuoteResult.model_validate(self._payload(response))
-
-    async def list_orders(self, request: OrderListInput) -> OrderPage:
+    async def list_store_skus(self, request: StoreSkuListInput) -> StoreSkuList:
         response = await self._client.get(
-            "/api/v1/orders",
+            f"/api/v1/store/products/{request.product_id}/skus"
+        )
+        return StoreSkuList(
+            product_id=request.product_id,
+            items=tuple(StoreSku.model_validate(item) for item in self._payload(response)),
+        )
+
+    async def get_store_sku(self, request: StoreSkuInput) -> StoreSku:
+        response = await self._client.get(f"/api/v1/store/skus/{request.sku_id}")
+        return StoreSku.model_validate(self._payload(response))
+
+    async def list_store_orders(self, request: StoreOrderListInput) -> StoreOrderPage:
+        response = await self._client.get(
+            "/api/v1/store/orders",
             params={
                 key: value
                 for key, value in {
@@ -86,7 +88,31 @@ class RentFlowClient:
             },
             headers={"Authorization": f"Bearer {self._access_token}"},
         )
-        return OrderPage.model_validate(self._payload(response))
+        return StoreOrderPage.model_validate(self._payload(response))
+
+    async def get_store_order(self, request: StoreOrderDetailInput) -> StoreOrder:
+        response = await self._client.get(
+            f"/api/v1/store/orders/{request.order_id}",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+        return StoreOrder.model_validate(self._payload(response))
+
+    @staticmethod
+    def _commerce_product(payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+        allowed = {
+            "productId",
+            "categoryId",
+            "equipmentRole",
+            "name",
+            "brand",
+            "model",
+            "description",
+            "useCases",
+            "storeSkus",
+        }
+        return {key: value for key, value in payload.items() if key in allowed}
 
     @staticmethod
     def _payload(response: httpx.Response) -> Any:

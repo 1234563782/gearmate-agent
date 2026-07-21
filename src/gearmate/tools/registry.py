@@ -13,26 +13,34 @@ from pydantic import BaseModel, ValidationError
 from gearmate.catalog import CatalogSearchService
 from gearmate.llm.types import ModelToolCall, ModelToolDefinition
 from gearmate.rentflow.client import RentFlowClient, RentFlowError
-from gearmate.requirements import EquipmentNeed, EquipmentRole, ScenarioPlan
 from gearmate.tools.contracts import (
-    AvailabilityInput,
-    AvailabilityResult,
-    OrderListInput,
-    OrderPage,
     ProductDetailInput,
     ProductSearchInput,
     ProductSearchResult,
     ProductSummary,
-    QuoteInput,
-    QuoteResult,
-    ScenarioKitInput,
-    ScenarioKitItem,
-    ScenarioKitResult,
+    StoreOrder,
+    StoreOrderDetailInput,
+    StoreOrderListInput,
+    StoreOrderPage,
+    StoreSku,
+    StoreSkuInput,
+    StoreSkuList,
+    StoreSkuListInput,
 )
 from gearmate.tools.metadata import ToolDescriptor
 from gearmate.validation.facts import FactSnapshot
 
 EventWriter = Callable[[str, dict[str, Any]], Awaitable[None]]
+MODEL_VISIBLE_TOOL_NAMES = frozenset(
+    {
+        "search_products",
+        "get_product",
+        "list_product_skus",
+        "get_store_sku",
+        "list_store_orders",
+        "get_store_order",
+    }
+)
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +60,6 @@ class ToolRegistry:
         timeout_seconds: float,
         max_result_items: int,
         max_concurrency: int,
-        scenario_plan: ScenarioPlan | None = None,
         catalog_search: CatalogSearchService | None = None,
         preferred_brands: tuple[str, ...] = (),
         excluded_brands: tuple[str, ...] = (),
@@ -60,19 +67,19 @@ class ToolRegistry:
         self._rentflow = rentflow
         self._max_result_items = max_result_items
         self._max_concurrency = max_concurrency
-        self._scenario_plan = scenario_plan
         self._catalog_search = catalog_search
         self._preferred_brands = frozenset(brand.casefold() for brand in preferred_brands)
         self._excluded_brands = frozenset(brand.casefold() for brand in excluded_brands)
         self._last_search_diagnostics: dict[str, Any] | None = None
         self._last_product_search_result: ProductSearchResult | None = None
-        self._last_availability_result: AvailabilityResult | None = None
-        self._last_quote_result: QuoteResult | None = None
+        self._last_store_skus: StoreSkuList | None = None
+        self._last_store_order_page: StoreOrderPage | None = None
+        self._last_store_order: StoreOrder | None = None
         self._cache: dict[str, ToolExecutionResult] = {}
         self._tools = {
             "search_products": ToolDescriptor(
                 name="search_products",
-                description="按关键词、类目、最高日租金和可选租期搜索 RentFlow 商品。",
+                description="按关键词、品类、品牌、型号、用途和购买价格搜索商城商品。",
                 input_model=ProductSearchInput,
                 handler=self._search_products,
                 read_only=True,
@@ -89,50 +96,44 @@ class ToolRegistry:
                 concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
             ),
-            "check_availability": ToolDescriptor(
-                name="check_availability",
-                description="查询一个商品在明确租期内的实时可租数量。",
-                input_model=AvailabilityInput,
-                handler=rentflow.search_availability,
+            "list_product_skus": ToolDescriptor(
+                name="list_product_skus",
+                description="查询一个商品当前可购买的 SKU、规格、售价和可售库存。",
+                input_model=StoreSkuListInput,
+                handler=self._list_product_skus,
                 read_only=True,
                 concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
             ),
-            "create_quote": ToolDescriptor(
-                name="create_quote",
-                description="为一个商品和明确租期生成不可变正式报价；不会锁定库存。",
-                input_model=QuoteInput,
-                handler=rentflow.create_quote,
-                read_only=False,
-                concurrency_safe=False,
+            "get_store_sku": ToolDescriptor(
+                name="get_store_sku",
+                description="按可信 SKU ID 查询规格、售价和可售库存。",
+                input_model=StoreSkuInput,
+                handler=self._get_store_sku,
+                read_only=True,
+                concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
             ),
-            "list_orders": ToolDescriptor(
-                name="list_orders",
-                description="查询当前登录用户的订单，可按订单状态筛选；不得查询其他用户。",
-                input_model=OrderListInput,
-                handler=self._list_orders,
+            "list_store_orders": ToolDescriptor(
+                name="list_store_orders",
+                description="查询当前登录用户的商城订单，可按支付和物流状态筛选。",
+                input_model=StoreOrderListInput,
+                handler=self._list_store_orders,
                 read_only=True,
                 concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
                 max_result_items=max_result_items,
             ),
-        }
-        if (
-            scenario_plan is not None
-            and scenario_plan.ready
-            and scenario_plan.requirements.daily_budget is not None
-        ):
-            self._tools["recommend_scenario_kit"] = ToolDescriptor(
-                name="recommend_scenario_kit",
-                description=("根据本轮已确认的场景设备角色和每日总预算，确定性选择完整设备组合。"),
-                input_model=ScenarioKitInput,
-                handler=self._recommend_scenario_kit,
+            "get_store_order": ToolDescriptor(
+                name="get_store_order",
+                description="查询当前登录用户的一笔商城订单详情。",
+                input_model=StoreOrderDetailInput,
+                handler=self._get_store_order,
                 read_only=True,
-                concurrency_safe=False,
+                concurrency_safe=True,
                 timeout_seconds=timeout_seconds,
-            )
-
+            ),
+        }
     @property
     def last_search_diagnostics(self) -> dict[str, Any] | None:
         if self._last_search_diagnostics is None:
@@ -144,12 +145,16 @@ class ToolRegistry:
         return self._last_product_search_result
 
     @property
-    def last_availability_result(self) -> AvailabilityResult | None:
-        return self._last_availability_result
+    def last_store_skus(self) -> StoreSkuList | None:
+        return self._last_store_skus
 
     @property
-    def last_quote_result(self) -> QuoteResult | None:
-        return self._last_quote_result
+    def last_store_order_page(self) -> StoreOrderPage | None:
+        return self._last_store_order_page
+
+    @property
+    def last_store_order(self) -> StoreOrder | None:
+        return self._last_store_order
 
     def model_definitions(self) -> tuple[ModelToolDefinition, ...]:
         return tuple(
@@ -159,6 +164,7 @@ class ToolRegistry:
                 parameters=tool.schema(),
             )
             for tool in self._tools.values()
+            if tool.name in MODEL_VISIBLE_TOOL_NAMES
         )
 
     async def execute_all(
@@ -260,10 +266,17 @@ class ToolRegistry:
                 visible_payload["items"] = items[: descriptor.max_result_items]
                 truncated = len(items) > descriptor.max_result_items
             visible_result = type(result).model_validate(visible_payload)
-            if isinstance(visible_result, AvailabilityResult):
-                self._last_availability_result = visible_result
-            elif isinstance(visible_result, QuoteResult):
-                self._last_quote_result = visible_result
+            if isinstance(visible_result, StoreSkuList):
+                self._last_store_skus = visible_result
+            elif isinstance(visible_result, StoreSku):
+                self._last_store_skus = StoreSkuList(
+                    product_id=visible_result.product_id,
+                    items=(visible_result,),
+                )
+            elif isinstance(visible_result, StoreOrderPage):
+                self._last_store_order_page = visible_result
+            elif isinstance(visible_result, StoreOrder):
+                self._last_store_order = visible_result
             await write_event(
                 "tool.completed",
                 {
@@ -321,6 +334,7 @@ class ToolRegistry:
         if request.semantic_query and self._catalog_search is not None:
             try:
                 semantic_result = await self._semantic_products(request)
+                semantic_result = await self._attach_store_skus(semantic_result)
                 semantic_result = self._apply_price_preference(semantic_result, request)
                 semantic_result = self._apply_user_preferences(semantic_result, request)
                 if semantic_result.items:
@@ -339,6 +353,7 @@ class ToolRegistry:
                     "semanticQuery": request.semantic_query,
                 }
         result = await self._rentflow.search_products(request)
+        result = await self._attach_store_skus(result)
         result = self._apply_price_preference(result, request)
         result = self._apply_user_preferences(result, request)
         diagnostics = self._last_search_diagnostics or {}
@@ -379,8 +394,37 @@ class ToolRegistry:
         self._last_product_search_result = filtered_result
         return filtered_result
 
-    async def _list_orders(self, request: OrderListInput) -> OrderPage:
-        return await self._rentflow.list_orders(request)
+    async def _list_product_skus(self, request: StoreSkuListInput) -> StoreSkuList:
+        return await self._rentflow.list_store_skus(request)
+
+    async def _get_store_sku(self, request: StoreSkuInput) -> StoreSku:
+        return await self._rentflow.get_store_sku(request)
+
+    async def _list_store_orders(self, request: StoreOrderListInput) -> StoreOrderPage:
+        return await self._rentflow.list_store_orders(request)
+
+    async def _get_store_order(self, request: StoreOrderDetailInput) -> StoreOrder:
+        return await self._rentflow.get_store_order(request)
+
+    async def _attach_store_skus(self, result: ProductSearchResult) -> ProductSearchResult:
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def attach(item: ProductSummary) -> ProductSummary:
+            try:
+                async with semaphore:
+                    skus = await self._rentflow.list_store_skus(
+                        StoreSkuListInput(product_id=item.product_id)
+                    )
+                return item.model_copy(update={"store_skus": skus.items})
+            except (AttributeError, RentFlowError, ValidationError, TypeError, httpx.HTTPError):
+                logger.warning("Store SKU enrichment failed for product %s", item.product_id)
+                return item
+
+        if not result.items:
+            return result
+        return result.model_copy(
+            update={"items": tuple(await asyncio.gather(*(attach(item) for item in result.items)))}
+        )
 
     @staticmethod
     def _apply_price_preference(
@@ -388,18 +432,26 @@ class ToolRegistry:
         request: ProductSearchInput,
     ) -> ProductSearchResult:
         items = result.items
-        if request.max_daily_rate is not None:
+        if request.max_price is not None:
             items = tuple(
-                item for item in items if Decimal(item.daily_rate) <= request.max_daily_rate
+                item
+                for item in items
+                if item.store_skus
+                and min(Decimal(sku.sale_price) for sku in item.store_skus) <= request.max_price
             )
-        if request.target_daily_rate is not None:
-            target_daily_rate = request.target_daily_rate
+        if request.target_price is not None:
+            target_price = request.target_price
             original_positions = {item.product_id: index for index, item in enumerate(items)}
             items = tuple(
                 sorted(
                     items,
                     key=lambda item: (
-                        abs(Decimal(item.daily_rate) - target_daily_rate),
+                        abs(
+                            min(Decimal(sku.sale_price) for sku in item.store_skus)
+                            - target_price
+                        )
+                        if item.store_skus
+                        else Decimal("Infinity"),
                         original_positions[item.product_id],
                     ),
                 )
@@ -481,16 +533,6 @@ class ToolRegistry:
         async def hydrate(product_id: str) -> ProductSummary:
             async with semaphore:
                 detail = await self._rentflow.get_product(product_id)
-                available_count: int | None = None
-                if request.rental_period is not None:
-                    availability = await self._rentflow.search_availability(
-                        AvailabilityInput(
-                            product_id=product_id,
-                            start_date=request.rental_period.start_date,
-                            end_date=request.rental_period.end_date,
-                        )
-                    )
-                    available_count = availability.available_count
                 return ProductSummary(
                     product_id=detail.product_id,
                     category_id=detail.category_id,
@@ -498,9 +540,6 @@ class ToolRegistry:
                     name=detail.name,
                     brand=detail.brand,
                     model=detail.model,
-                    daily_rate=detail.daily_rate,
-                    fixed_deposit=detail.fixed_deposit,
-                    available_count=available_count,
                     use_cases=detail.use_cases,
                 )
 
@@ -513,58 +552,4 @@ class ToolRegistry:
             size=max(1, min(100, self._max_result_items)),
             total_elements=len(items),
             total_pages=1 if items else 0,
-        )
-
-    async def _recommend_scenario_kit(self, request: ScenarioKitInput) -> ScenarioKitResult:
-        plan = self._scenario_plan
-        if plan is None or not plan.ready or plan.requirements.daily_budget is None:
-            raise ValueError("A complete scenario plan with a budget is required")
-        budget = plan.requirements.daily_budget
-
-        async def search(
-            need: EquipmentNeed,
-        ) -> tuple[EquipmentNeed, ProductSummary | None]:
-            result = await self._search_products(
-                ProductSearchInput(
-                    keyword=need.keyword,
-                    equipment_role=need.role,
-                    rental_period=request.rental_period,
-                    max_daily_rate=budget,
-                    size=self._max_result_items,
-                )
-            )
-            eligible = [
-                product
-                for product in result.items
-                if product.available_count is None or product.available_count >= need.quantity
-            ]
-            eligible.sort(key=lambda product: (Decimal(product.daily_rate), product.product_id))
-            return need, eligible[0] if eligible else None
-
-        matches = await asyncio.gather(*(search(need) for need in plan.equipment_needs))
-        items: list[ScenarioKitItem] = []
-        missing_roles: list[EquipmentRole] = []
-        total = Decimal("0")
-        for need, product in matches:
-            if product is None:
-                missing_roles.append(need.role)
-                continue
-            subtotal = Decimal(product.daily_rate) * need.quantity
-            total += subtotal
-            items.append(
-                ScenarioKitItem(
-                    role=need.role,
-                    quantity=need.quantity,
-                    product=product,
-                    subtotal_daily_rate=f"{subtotal:.2f}",
-                )
-            )
-        return ScenarioKitResult(
-            scenario=plan.requirements.scenario_id,
-            items=tuple(items),
-            total_daily_rate=f"{total:.2f}",
-            max_daily_budget=f"{budget:.2f}",
-            within_budget=not missing_roles and total <= budget,
-            availability_checked=request.rental_period is not None,
-            missing_roles=tuple(missing_roles),
         )

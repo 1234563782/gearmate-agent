@@ -169,7 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="GearMate API",
         version=__version__,
-        description="Electronic equipment rental selection and quote assistant service",
+        description="Electronics commerce product discovery and purchase assistant service",
         lifespan=lifespan,
     )
     app.state.settings = resolved_settings

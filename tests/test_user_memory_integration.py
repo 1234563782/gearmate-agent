@@ -36,10 +36,7 @@ class FakeConversationMemory:
         now = datetime(2026, 7, 20, tzinfo=UTC)
         return ConversationContext(
             messages=(ModelMessage(role="user", content=self.message),),
-            rental_period=None,
-            rental_requirements=None,
             pending_product_search=None,
-            pending_rental_action=None,
             recent_product_search=None,
             timezone="Asia/Shanghai",
             now_utc=now,
@@ -115,7 +112,6 @@ async def test_run_reads_and_extracts_user_memory_with_authenticated_user_id() -
             user_id="user-1",
             access_token="token",
             message=message,
-            rental_period=None,
         )
 
     assert user_memory.built_for == "user-1"

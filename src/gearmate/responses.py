@@ -1,160 +1,134 @@
 from gearmate.actions import AgentAction
-from gearmate.tools.contracts import OrderStatus, RentalPeriodInput
+from gearmate.tools.contracts import StoreOrderStatus
 from gearmate.validation.facts import FactSnapshot
 
 
 class UserResponseComposer:
-    def compose(
-        self,
-        *,
-        action: AgentAction,
-        facts: FactSnapshot,
-        rental_period: RentalPeriodInput | None,
-        timezone: str = "Asia/Shanghai",
-    ) -> str:
-        if facts.scenario_kits:
-            return self._scenario(facts)
+    def compose(self, *, action: AgentAction, facts: FactSnapshot) -> str:
         if action.action == "product_search":
-            return self._product_search(action, facts, rental_period)
+            return self._product_search(action, facts)
         if action.action == "product_detail":
             return self._product_detail(facts)
-        if action.action == "availability":
-            return self._availability(facts)
-        if action.action == "quote":
-            return self._quote(facts)
         if action.action == "order_list":
-            return self._orders(facts, timezone)
+            return self._store_orders(facts)
+        if action.action == "order_detail":
+            return self._store_order_detail(facts)
+        if action.action == "sku_stock":
+            return self._sku_stock(facts)
+        if action.action == "purchase_prepare":
+            return self._purchase_prepare(action, facts)
         return facts.fallback_text()
 
-    def _product_search(
-        self,
-        action: AgentAction,
-        facts: FactSnapshot,
-        rental_period: RentalPeriodInput | None,
-    ) -> str:
+    @staticmethod
+    def _product_search(action: AgentAction, facts: FactSnapshot) -> str:
         products = list(facts.products.values())
         if not products:
-            return (
-                "暂时没有找到符合这些条件的设备。可以放宽用途、价格或品牌要求，我再帮你重新筛选。"
-            )
-        if action.target_daily_rate is not None:
-            intro = f"我按目标日租 ¥{action.target_daily_rate} 和你的使用需求筛选了这些设备："
-        elif action.max_daily_rate is not None:
-            intro = f"我按日租不超过 ¥{action.max_daily_rate} 和你的使用需求筛选了这些设备："
+            return "暂时没有找到符合条件的商品。可以放宽用途、价格或品牌要求后重试。"
+        if action.target_price is not None:
+            intro = f"我按目标购买价 ¥{action.target_price} 和使用需求筛选了这些商品："
+        elif action.max_price is not None:
+            intro = f"我按售价不超过 ¥{action.max_price} 和使用需求筛选了这些商品："
         else:
-            intro = "我按你的设备类型和使用需求筛选了这些候选："
+            intro = "我按商品类型和使用需求筛选了这些候选："
 
         lines = [intro]
         for index, product in enumerate(products[:4]):
             reasons = "、".join(item.name for item in product.use_cases[:2])
-            detail = f"日租 ¥{product.daily_rate}"
+            available_skus = [sku for sku in product.store_skus if sku.enabled]
+            detail = (
+                f"售价 ¥{min(float(sku.sale_price) for sku in available_skus):.2f} 起"
+                if available_skus
+                else "暂未配置可售规格"
+            )
             if reasons:
                 detail += f"，适合{reasons}"
-            if product.available_count is not None:
-                detail += f"，当前租期可租 {product.available_count} 台"
+            if available_skus:
+                detail += f"，当前库存 {sum(sku.available_quantity for sku in available_skus)} 件"
             prefix = "优先推荐" if index == 0 else "备选"
             lines.append(f"- {prefix} {product.name}：{detail}。")
 
-        if rental_period is not None:
-            lines.append(
-                "我已按你提供的起止日期核验库存，结束日也包含在租期内；点开卡片即可查看完整报价并继续预订。"
-            )
-        else:
-            lines.append(
-                "目前显示的是日租参考价；请提供起止日期（最早从后天开始，结束日包含在租期内），我可以继续查询实时库存和总价。"
-            )
+        lines.append("点开商品卡片可以选择规格和数量，确认后再进入结算，不会由 Agent 自动下单。")
         return "\n".join(lines)
 
     @staticmethod
     def _product_detail(facts: FactSnapshot) -> str:
         product = next(iter(facts.products.values()), None)
         if product is None:
-            return "暂时没有取得这款设备的详细信息，请重新选择商品。"
+            return "暂时没有取得这款商品的详细信息，请重新选择商品。"
         reasons = "、".join(item.name for item in product.use_cases[:3])
-        lines = [
-            f"这款是 {product.name}（{product.brand} {product.model}）。",
-            f"日租 ¥{product.daily_rate}，固定押金 ¥{product.fixed_deposit}。",
-        ]
+        skus = [sku for sku in facts.store_skus.values() if sku.product_id == product.product_id]
+        lines = [f"这款是 {product.name}（{product.brand} {product.model}）。"]
+        if skus:
+            lines.append(
+                f"目前有 {len(skus)} 种规格，售价 "
+                f"¥{min(float(sku.sale_price) for sku in skus):.2f} 起。"
+            )
         if reasons:
             lines.append(f"目录中标注的主要适用场景是：{reasons}。")
-        lines.append(
-            "请提供起止日期（最早从后天开始，结束日包含在租期内），我可以继续核验库存和完整报价。"
-        )
+        lines.append("点开卡片即可选择规格和数量后进入结算。")
         return "\n".join(lines)
 
     @staticmethod
-    def _availability(facts: FactSnapshot) -> str:
-        availability = next(iter(facts.availability.values()), None)
-        if availability is None:
-            return "暂时没有取得这个租期的实时库存，请稍后重试。"
-        if availability.available:
+    def _sku_stock(facts: FactSnapshot) -> str:
+        skus = list(facts.store_skus.values())
+        if not skus:
+            return "这款商品暂时没有可售规格。"
+        lines = ["当前可购买规格如下："]
+        for sku in skus:
+            state = f"库存 {sku.available_quantity} 件" if sku.available_quantity else "暂时缺货"
+            lines.append(f"- {sku.sku_name}：售价 ¥{sku.sale_price}，{state}。")
+        return "\n".join(lines)
+
+    @classmethod
+    def _purchase_prepare(cls, action: AgentAction, facts: FactSnapshot) -> str:
+        text = cls._sku_stock(facts)
+        if facts.store_skus:
+            quantity = action.quantity or 1
+            text += f"\n已按 {quantity} 件准备购买选项，请在弹窗中确认规格、数量和收货信息。"
+        return text
+
+    @classmethod
+    def _store_orders(cls, facts: FactSnapshot) -> str:
+        orders = list(facts.store_orders.values())
+        if not orders:
             return (
-                f"这个租期可以租，目前还有 {availability.available_count} 台。\n"
-                "点开下方卡片可以查看完整报价并继续预订。"
+                "当前筛选条件下没有商城订单。"
+                if facts.store_order_list_performed
+                else "暂时无法取得商城订单。"
             )
-        return "这个租期暂时没有可租库存。可以调整时间，我再帮你重新查询。"
-
-    @staticmethod
-    def _quote(facts: FactSnapshot) -> str:
-        quote = next(iter(facts.quotes.values()), None)
-        if quote is None:
-            return "正式报价暂时没有生成成功，请确认商品和租期后重试。"
-        price = quote.price_snapshot
-        return "\n".join(
-            (
-                "正式报价已经生成：",
-                f"- 日租 ¥{price.daily_rate}，计费 {price.billing_days} 个自然日"
-                "（结束日包含在租期内）。",
-                f"- 租金 ¥{price.rental_amount}，押金 ¥{price.deposit_amount}。",
-                f"- 合计 ¥{price.total_amount}。",
-                "报价有有效期，确认无误后可以继续预订。",
-            )
-        )
-
-    @staticmethod
-    def _scenario(facts: FactSnapshot) -> str:
-        kit = facts.scenario_kits[-1]
-        lines = ["我按完整场景需求组合了这套设备："]
-        for item in kit.items:
+        lines = ["这是你最近的商城订单："]
+        for order in orders:
+            products = "、".join(item.product_name for item in order.items[:2]) or "商城商品"
+            quantity = sum(item.quantity for item in order.items)
             lines.append(
-                f"- {item.product.name} × {item.quantity}：小计 ¥{item.subtotal_daily_rate}/天。"
-            )
-        lines.append(
-            f"组合日租合计 ¥{kit.total_daily_rate}，预算 ¥{kit.max_daily_budget}，"
-            + ("在预算内。" if kit.within_budget else "目前超出预算或缺少必要设备。")
-        )
-        if kit.missing_roles:
-            lines.append("当前目录还缺少部分必要设备，可以调整方案后重新组合。")
-        if not kit.availability_checked:
-            lines.append(
-                "补充起止日期后（最早从后天开始，结束日包含在租期内），我会继续核验整套设备的实时库存。"
+                f"- {products}：{cls._store_order_status_label(order.status)}，"
+                f"共 {quantity} 件，合计 ¥{order.payable_amount}。"
             )
         return "\n".join(lines)
 
     @classmethod
-    def _orders(cls, facts: FactSnapshot, timezone: str) -> str:
-        orders = list(facts.orders.values())
-        if not orders:
-            return (
-                "当前筛选条件下没有订单。" if facts.order_list_performed else "暂时无法取得订单。"
-            )
-
-        lines = ["这是你最近的订单："]
-        for order in orders:
-            status = cls._order_status_label(order.effective_status)
-            period = f"{order.start_date.isoformat()} 至 {order.end_date.isoformat()}（结束日包含）"
+    def _store_order_detail(cls, facts: FactSnapshot) -> str:
+        order = next(iter(facts.store_orders.values()), None)
+        if order is None:
+            return "暂时没有取得这笔商城订单。"
+        lines = [f"订单状态：{cls._store_order_status_label(order.status)}。"]
+        for item in order.items:
             lines.append(
-                f"- {order.product_name}（{order.product_model}）：{status}，"
-                f"租期 {period}，合计 ¥{order.price_snapshot.total_amount}。"
+                f"- {item.product_name}：{item.sku_name} × {item.quantity}，"
+                f"小计 ¥{item.subtotal}。"
             )
+        lines.append(f"应付合计 ¥{order.payable_amount}。")
+        if order.carrier and order.tracking_number:
+            lines.append(f"物流：{order.carrier}，运单号 {order.tracking_number}。")
         return "\n".join(lines)
 
     @staticmethod
-    def _order_status_label(status: OrderStatus) -> str:
+    def _store_order_status_label(status: StoreOrderStatus) -> str:
         return {
-            "PENDING_CONFIRMATION": "待确认",
-            "CONFIRMED": "已确认",
-            "RECEIVED": "已收货",
+            "PENDING_PAYMENT": "待支付",
+            "PAID": "待发货",
+            "SHIPPED": "待收货",
+            "RECEIVED": "已完成",
             "CANCELLED": "已取消",
-            "EXPIRED": "已过期",
+            "CLOSED": "已关闭",
         }[status]

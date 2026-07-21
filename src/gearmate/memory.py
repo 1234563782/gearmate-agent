@@ -1,25 +1,22 @@
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from math import ceil
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from gearmate.actions import PendingProductSearch, PendingRentalAction
+from gearmate.actions import PendingProductSearch
 from gearmate.config import Settings
 from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelUsage
-from gearmate.rental_period import InvalidRentalPeriod, RentalPeriodPolicy
-from gearmate.requirements import RentalRequirements
 from gearmate.search import RecentProductSearch
-from gearmate.tools.contracts import RentalPeriodInput
 
 SUMMARY_SYSTEM_PROMPT = """你负责压缩 GearMate 的较早会话历史。
-只保留用户目标、偏好、已确认租期、数量、预算、用途、候选商品和未解决问题。
-不要把库存数量、价格或报价描述成当前仍然有效的事实; 这些信息必须在新一轮中重新查询。
+只保留用户目标、稳定偏好、数量、购买预算、用途、候选商品和未解决问题。
+不要把库存数量、售价、订单状态或物流描述成当前仍然有效的事实; 这些信息必须在新一轮中重新查询。
 不要添加原文中不存在的信息。使用简洁中文纯文本, 不要输出 JSON 或 Markdown 标题。"""
 
 SUMMARY_CONTEXT_PREFIX = """以下是更早会话的摘要, 仅用于理解用户目标和已确认约束。
-摘要中的库存、价格和报价都可能已经过期, 引用前必须重新调用工具:
+摘要中的库存、售价、订单状态和物流都可能已经过期, 引用前必须重新调用工具:
 """
 
 TIME_CONTEXT_TEMPLATE = """当前可信时间:
@@ -32,11 +29,7 @@ TIME_CONTEXT_TEMPLATE = """当前可信时间:
 
 @dataclass(frozen=True, slots=True)
 class ConversationStateMemory:
-    rental_start_date: date | None
-    rental_end_date: date | None
-    rental_requirements: RentalRequirements | None = None
     pending_product_search: PendingProductSearch | None = None
-    pending_rental_action: PendingRentalAction | None = None
     recent_product_search: RecentProductSearch | None = None
 
 
@@ -61,12 +54,6 @@ class ConversationMessageMemory:
 class MemoryRepository(Protocol):
     async def conversation_timezone(self, conversation_id: str) -> str: ...
 
-    async def upsert_conversation_rental_period(
-        self, conversation_id: str, rental_period: RentalPeriodInput
-    ) -> None: ...
-
-    async def clear_conversation_rental_period(self, conversation_id: str) -> None: ...
-
     async def upsert_pending_product_search(
         self,
         conversation_id: str,
@@ -75,22 +62,10 @@ class MemoryRepository(Protocol):
 
     async def clear_pending_product_search(self, conversation_id: str) -> None: ...
 
-    async def upsert_pending_rental_action(
-        self,
-        conversation_id: str,
-        pending_action: PendingRentalAction,
-    ) -> None: ...
-
-    async def clear_pending_rental_action(self, conversation_id: str) -> None: ...
-
     async def upsert_recent_product_search(
         self,
         conversation_id: str,
         recent_search: RecentProductSearch,
-    ) -> None: ...
-
-    async def upsert_conversation_requirements(
-        self, conversation_id: str, requirements: RentalRequirements
     ) -> None: ...
 
     async def conversation_state(self, conversation_id: str) -> ConversationStateMemory | None: ...
@@ -125,10 +100,7 @@ class MemoryRepository(Protocol):
 @dataclass(frozen=True, slots=True)
 class ConversationContext:
     messages: tuple[ModelMessage, ...]
-    rental_period: RentalPeriodInput | None
-    rental_requirements: RentalRequirements | None
     pending_product_search: PendingProductSearch | None
-    pending_rental_action: PendingRentalAction | None
     recent_product_search: RecentProductSearch | None
     timezone: str
     now_utc: datetime
@@ -145,22 +117,6 @@ class ConversationMemoryService:
     def __init__(self, repository: MemoryRepository, settings: Settings) -> None:
         self._repository = repository
         self._settings = settings
-        self._rental_period_policy = RentalPeriodPolicy(settings.rental_period_max_advance_days)
-
-    async def remember_rental_period(
-        self,
-        conversation_id: str,
-        rental_period: RentalPeriodInput,
-        *,
-        now_utc: datetime | None = None,
-    ) -> None:
-        self._rental_period_policy.validate(rental_period, now_utc=now_utc)
-        await self._repository.upsert_conversation_rental_period(conversation_id, rental_period)
-
-    async def remember_requirements(
-        self, conversation_id: str, requirements: RentalRequirements
-    ) -> None:
-        await self._repository.upsert_conversation_requirements(conversation_id, requirements)
 
     async def remember_pending_product_search(
         self,
@@ -174,19 +130,6 @@ class ConversationMemoryService:
 
     async def clear_pending_product_search(self, conversation_id: str) -> None:
         await self._repository.clear_pending_product_search(conversation_id)
-
-    async def remember_pending_rental_action(
-        self,
-        conversation_id: str,
-        pending_action: PendingRentalAction,
-    ) -> None:
-        await self._repository.upsert_pending_rental_action(
-            conversation_id,
-            pending_action,
-        )
-
-    async def clear_pending_rental_action(self, conversation_id: str) -> None:
-        await self._repository.clear_pending_rental_action(conversation_id)
 
     async def remember_recent_product_search(
         self,
@@ -241,28 +184,9 @@ class ConversationMemoryService:
             ModelMessage(role=item.role, content=item.content) for item in reversed(selected)
         )
 
-        rental_period = None
-        if (
-            state is not None
-            and state.rental_start_date is not None
-            and state.rental_end_date is not None
-        ):
-            stored_period = RentalPeriodInput(
-                start_date=state.rental_start_date,
-                end_date=state.rental_end_date,
-            )
-            try:
-                rental_period = self._rental_period_policy.validate(
-                    stored_period, now_utc=reference_utc
-                )
-            except InvalidRentalPeriod:
-                await self._repository.clear_conversation_rental_period(conversation_id)
         return ConversationContext(
             messages=tuple(messages),
-            rental_period=rental_period,
-            rental_requirements=(state.rental_requirements if state is not None else None),
             pending_product_search=(state.pending_product_search if state is not None else None),
-            pending_rental_action=(state.pending_rental_action if state is not None else None),
             recent_product_search=(state.recent_product_search if state is not None else None),
             timezone=timezone,
             now_utc=reference_utc,

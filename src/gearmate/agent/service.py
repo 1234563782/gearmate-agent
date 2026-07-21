@@ -8,9 +8,7 @@ import httpx
 from gearmate.actions import (
     AgentActionResolver,
     PendingProductSearch,
-    PendingRentalAction,
     merge_pending_product_search,
-    merge_pending_rental_action,
 )
 from gearmate.agent.workflow import GearMateAgent
 from gearmate.catalog import CatalogSearchService
@@ -24,24 +22,13 @@ from gearmate.memory import ConversationMemoryService
 from gearmate.persistence.repositories import AgentRepository
 from gearmate.prompts.loader import RenderedPrompt
 from gearmate.recommendations import RecommendationPlanner
-from gearmate.rental_period import (
-    RentalPeriodPolicy,
-    RentalPeriodResolver,
-    has_temporal_signal,
-)
 from gearmate.rentflow.client import RentFlowClient
-from gearmate.requirements import (
-    RentalRequirementsResolver,
-    ScenarioCatalog,
-    ScenarioPlan,
-)
 from gearmate.resilience import (
     ModelCircuitOpenError,
     ModelQueueFullError,
     ModelQueueTimeoutError,
 )
 from gearmate.search import RecentProductSearch
-from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
 from gearmate.user_memory import UserMemoryService
 
@@ -68,18 +55,10 @@ class RunCoordinator:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._memory = ConversationMemoryService(repository, settings)
         self._user_memory = user_memory or UserMemoryService(repository, settings)
-        rental_period_policy = RentalPeriodPolicy(settings.rental_period_max_advance_days)
-        self._rental_period_resolver = RentalPeriodResolver(rental_period_policy)
         self._action_resolver = AgentActionResolver(settings.equipment_roles)
         self._intent_pre_router = IntentPreRouter(
             pure_social_enabled=settings.intent_pre_router_pure_social_enabled,
-            pending_confirmation_enabled=(
-                settings.intent_pre_router_pending_confirmation_enabled
-            ),
-            pending_date_enabled=settings.intent_pre_router_pending_date_enabled,
         )
-        self._scenario_catalog = ScenarioCatalog.load_default()
-        self._requirements_resolver = RentalRequirementsResolver(self._scenario_catalog)
 
     async def start(
         self,
@@ -88,11 +67,8 @@ class RunCoordinator:
         user_id: str,
         access_token: str,
         message: str,
-        rental_period: RentalPeriodInput | None,
     ) -> str:
         await self._repository.require_conversation(conversation_id, user_id)
-        if rental_period is not None:
-            await self._memory.remember_rental_period(conversation_id, rental_period)
         run = await self._repository.create_run(
             conversation_id,
             model_provider=self._settings.model_provider,
@@ -109,7 +85,6 @@ class RunCoordinator:
                 user_id=user_id,
                 access_token=access_token,
                 message=message,
-                rental_period=rental_period,
             ),
             name=f"gearmate-run-{run.id}",
         )
@@ -149,7 +124,6 @@ class RunCoordinator:
         user_id: str,
         access_token: str,
         message: str,
-        rental_period: RentalPeriodInput | None,
     ) -> None:
         async def write_event(event_type: str, payload: dict[str, Any]) -> None:
             await self._repository.append_event(run_id, event_type, payload)
@@ -162,13 +136,9 @@ class RunCoordinator:
                 self._user_memory.build_context(user_id),
             )
             user_memory_prompt = user_memory_context.prompt_context()
-            effective_rental_period = rental_period or context.rental_period
             pre_route: IntentPreRouteDecision | None = None
             if self._settings.intent_pre_router_mode != "off":
-                pre_route = self._intent_pre_router.resolve(
-                    message,
-                    pending_rental_action=context.pending_rental_action,
-                )
+                pre_route = self._intent_pre_router.resolve(message)
 
             action_model_called = not (
                 self._settings.intent_pre_router_mode == "enforce" and pre_route is not None
@@ -178,13 +148,7 @@ class RunCoordinator:
                 action_resolution = await self._action_resolver.resolve(
                     message=message,
                     history=context.messages,
-                    current_scenario_id=(
-                        context.rental_requirements.scenario_id
-                        if context.rental_requirements is not None
-                        else None
-                    ),
                     pending_product_search=context.pending_product_search,
-                    pending_rental_action=context.pending_rental_action,
                     model=model,
                     max_output_tokens=(self._settings.action_resolution_max_output_tokens),
                     recent_product_search_json=(
@@ -253,10 +217,6 @@ class RunCoordinator:
                 action,
                 context.pending_product_search,
             )
-            action = merge_pending_rental_action(
-                action,
-                context.pending_rental_action,
-            )
             resolution_payload = {
                 "source": "llm_tool_call" if action_model_called else "deterministic",
                 "rule": pre_route.rule if not action_model_called and pre_route else None,
@@ -268,10 +228,6 @@ class RunCoordinator:
                     candidate_action = merge_pending_product_search(
                         pre_route.action,
                         context.pending_product_search,
-                    )
-                    candidate_action = merge_pending_rental_action(
-                        candidate_action,
-                        context.pending_rental_action,
                     )
                 resolution_payload.update(
                     {
@@ -290,44 +246,12 @@ class RunCoordinator:
                 and context.pending_product_search is not None
             ):
                 await self._memory.clear_pending_product_search(conversation_id)
-            if (
-                action.action not in ("chat", "availability", "quote")
-                and context.pending_rental_action is not None
-            ):
-                await self._memory.clear_pending_rental_action(conversation_id)
-
             pending_product_search: PendingProductSearch | None = None
             if action.action == "product_search":
-                waiting_for_period = rental_period is None and (
-                    has_temporal_signal(message)
-                    or (
-                        action.continues_pending
-                        and context.pending_product_search is not None
-                        and context.pending_product_search.waiting_for_rental_period
-                    )
-                )
-                pending_product_search = PendingProductSearch.from_action(
-                    action,
-                    waiting_for_rental_period=waiting_for_period,
-                )
+                pending_product_search = PendingProductSearch.from_action(action)
                 await self._memory.remember_pending_product_search(
                     conversation_id,
                     pending_product_search,
-                )
-            pending_rental_action: PendingRentalAction | None = None
-            if (
-                action.action in ("availability", "quote")
-                and action.product_id is not None
-                and (
-                    effective_rental_period is None
-                    or has_temporal_signal(message)
-                    or (action.continues_pending and context.pending_rental_action is not None)
-                )
-            ):
-                pending_rental_action = PendingRentalAction.from_action(action)
-                await self._memory.remember_pending_rental_action(
-                    conversation_id,
-                    pending_rental_action,
                 )
             await write_event("action.resolution", resolution_payload)
             await write_event(
@@ -335,109 +259,11 @@ class RunCoordinator:
                 action.model_dump(mode="json", by_alias=True),
             )
 
-            resolver_usage = ModelUsage()
-            resolver_rounds = 0
-            should_resolve_period = rental_period is None and (
-                has_temporal_signal(message)
-                or (
-                    pending_product_search is not None
-                    and pending_product_search.waiting_for_rental_period
-                )
-                or (pending_rental_action is not None and action.continues_pending)
-            )
-            if should_resolve_period:
-                resolution = await self._rental_period_resolver.resolve(
-                    message=message,
-                    timezone=context.timezone,
-                    now_utc=context.now_utc,
-                    now_local=context.now_local,
-                    history=context.messages,
-                    model=model,
-                    max_output_tokens=(self._settings.rental_period_extraction_max_output_tokens),
-                )
-                resolver_usage = resolution.usage
-                resolver_rounds = 1
-                if resolution.rental_period is not None:
-                    effective_rental_period = resolution.rental_period
-                    await self._memory.remember_rental_period(
-                        conversation_id,
-                        resolution.rental_period,
-                        now_utc=context.now_utc,
-                    )
-                    if pending_product_search is not None:
-                        pending_product_search = pending_product_search.model_copy(
-                            update={"waiting_for_rental_period": False}
-                        )
-                        await self._memory.remember_pending_product_search(
-                            conversation_id,
-                            pending_product_search,
-                        )
-                else:
-                    await self._complete_clarification(
-                        run_id=run_id,
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message=message,
-                        model=model,
-                        text=resolution.clarification or "请确认完整的开始和结束时间。",
-                        usage=self._combine_usage(action_usage, resolver_usage),
-                        duration_ms=round((monotonic() - started) * 1000),
-                        model_rounds=action_rounds + resolver_rounds,
-                    )
-                    return
-            requirements_usage = ModelUsage()
-            requirements_rounds = 0
-            scenario_plan: ScenarioPlan | None = None
-            should_resolve_requirements = action.action == "scenario_continue"
-            if should_resolve_requirements and context.rental_requirements is not None:
-                scenario_plan = self._scenario_catalog.build_plan(context.rental_requirements)
-            if should_resolve_requirements:
-                requirements_resolution = await self._requirements_resolver.resolve(
-                    message=message,
-                    history=context.messages,
-                    current=context.rental_requirements,
-                    model=model,
-                    max_output_tokens=(self._settings.requirements_extraction_max_output_tokens),
-                )
-                requirements_usage = requirements_resolution.usage
-                requirements_rounds = 1
-                scenario_plan = requirements_resolution.plan
-                if scenario_plan is not None:
-                    await self._memory.remember_requirements(
-                        conversation_id, scenario_plan.requirements
-                    )
-                    await write_event(
-                        "requirements.resolved",
-                        {
-                            **scenario_plan.model_context(),
-                            "ready": scenario_plan.ready,
-                            "missingFields": list(scenario_plan.missing_fields),
-                        },
-                    )
-                if scenario_plan is None or not scenario_plan.ready:
-                    clarification_usage = self._combine_usage(
-                        resolver_usage,
-                        action_usage,
-                        requirements_usage,
-                    )
-                    await self._complete_clarification(
-                        run_id=run_id,
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message=message,
-                        model=model,
-                        text=requirements_resolution.clarification or "请补充完整的设备租赁需求。",
-                        usage=clarification_usage,
-                        duration_ms=round((monotonic() - started) * 1000),
-                        model_rounds=(resolver_rounds + action_rounds + requirements_rounds),
-                    )
-                    return
             tools = ToolRegistry(
                 RentFlowClient(self._rentflow_http, access_token),
                 timeout_seconds=self._settings.tool_timeout_seconds,
                 max_result_items=self._settings.max_tool_result_items,
                 max_concurrency=self._settings.max_tool_concurrency,
-                scenario_plan=scenario_plan,
                 catalog_search=self._catalog_search,
                 preferred_brands=user_memory_context.preferred_brands,
                 excluded_brands=user_memory_context.excluded_brands,
@@ -447,11 +273,8 @@ class RunCoordinator:
                 result = await agent.run(
                     message=message,
                     history=list(context.messages),
-                    rental_period=effective_rental_period,
-                    scenario_plan=scenario_plan,
                     action=action,
                     write_event=write_event,
-                    timezone=context.timezone,
                     user_memory_context=user_memory_prompt,
                 )
             if tools.last_search_diagnostics is not None:
@@ -461,7 +284,6 @@ class RunCoordinator:
                 presentation = RecommendationPlanner().plan(
                     tools.last_product_search_result,
                     action,
-                    effective_rental_period,
                 )
                 presentation_payload = presentation.model_dump(mode="json", by_alias=True)
                 await write_event("recommendation.presented", presentation_payload)
@@ -470,72 +292,39 @@ class RunCoordinator:
                     RecentProductSearch.from_result(tools.last_product_search_result),
                 )
             elif (
-                action.action in ("availability", "quote")
-                and action.product_id is not None
-                and effective_rental_period is not None
+                action.action in ("sku_stock", "purchase_prepare")
+                and tools.last_store_skus is not None
                 and context.recent_product_search is not None
-                and (
-                    tools.last_availability_result is not None
-                    or tools.last_quote_result is not None
-                )
             ):
                 product = next(
                     (
                         item
                         for item in context.recent_product_search.items
-                        if item.product_id == action.product_id
+                        if item.product_id == tools.last_store_skus.product_id
                     ),
                     None,
                 )
                 if product is not None:
-                    exact_presentation = RecommendationPlanner().plan_exact(
+                    presentation = RecommendationPlanner().plan_purchase(
                         product,
-                        effective_rental_period,
-                        (
-                            tools.last_availability_result.available_count
-                            if tools.last_availability_result is not None
-                            else None
-                        ),
-                        tools.last_quote_result,
+                        tools.last_store_skus,
+                        action.quantity or 1,
                     )
-                    if exact_presentation is not None:
-                        presentation_payload = exact_presentation.model_dump(
-                            mode="json", by_alias=True
-                        )
-                        await write_event("recommendation.presented", presentation_payload)
+                    presentation_payload = presentation.model_dump(mode="json", by_alias=True)
+                    await write_event("recommendation.presented", presentation_payload)
             if action.action == "product_search" and result.tool_call_count > 0:
                 follow_up = (
                     presentation_payload.get("followUp")
                     if presentation_payload is not None
                     else None
                 )
-                if isinstance(follow_up, dict) and follow_up.get("field") in {
-                    "use_case",
-                    "rental_period",
-                }:
-                    if (
-                        follow_up.get("field") == "rental_period"
-                        and pending_product_search is not None
-                    ):
-                        pending_product_search = pending_product_search.model_copy(
-                            update={"waiting_for_rental_period": True}
-                        )
-                        await self._memory.remember_pending_product_search(
-                            conversation_id,
-                            pending_product_search,
-                        )
-                else:
+                if not (
+                    isinstance(follow_up, dict) and follow_up.get("field") == "use_case"
+                ):
                     await self._memory.clear_pending_product_search(conversation_id)
-            if action.action in ("availability", "quote") and result.tool_call_count > 0:
-                await self._memory.clear_pending_rental_action(conversation_id)
-            preprocessing_usage = self._combine_usage(
-                resolver_usage, action_usage, requirements_usage
-            )
-            input_tokens = result.input_tokens + preprocessing_usage.input_tokens
-            output_tokens = result.output_tokens + preprocessing_usage.output_tokens
-            model_rounds = (
-                result.model_rounds + resolver_rounds + requirements_rounds + action_rounds
-            )
+            input_tokens = result.input_tokens + action_usage.input_tokens
+            output_tokens = result.output_tokens + action_usage.output_tokens
+            model_rounds = result.model_rounds + action_rounds
             state = {
                 "reply": result.text,
                 "stopReason": result.stop_reason,

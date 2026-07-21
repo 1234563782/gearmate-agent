@@ -8,7 +8,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from gearmate.actions import PendingProductSearch, PendingRentalAction
+from gearmate.actions import PendingProductSearch
 from gearmate.ids import new_ulid
 from gearmate.memory import (
     ConversationMessageMemory,
@@ -25,9 +25,7 @@ from gearmate.persistence.models import (
     RunEvent,
     UserMemory,
 )
-from gearmate.requirements import RentalRequirements
 from gearmate.search import RecentProductSearch
-from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.user_memory import (
     MemoryKey,
     MemoryStatus,
@@ -638,40 +636,6 @@ class AgentRepository:
             updated_at=memory.updated_at,
         )
 
-    async def upsert_conversation_rental_period(
-        self,
-        conversation_id: str,
-        rental_period: RentalPeriodInput,
-    ) -> None:
-        statement = pg_insert(ConversationState).values(
-            conversation_id=conversation_id,
-            rental_start_date=rental_period.start_date,
-            rental_end_date=rental_period.end_date,
-            attributes={},
-        )
-        statement = statement.on_conflict_do_update(
-            index_elements=[ConversationState.conversation_id],
-            set_={
-                "rental_start_date": rental_period.start_date,
-                "rental_end_date": rental_period.end_date,
-                "updated_at": func.current_timestamp(),
-            },
-        )
-        async with self._sessions.begin() as session:
-            await session.execute(statement)
-
-    async def clear_conversation_rental_period(self, conversation_id: str) -> None:
-        async with self._sessions.begin() as session:
-            await session.execute(
-                update(ConversationState)
-                .where(ConversationState.conversation_id == conversation_id)
-                .values(
-                    rental_start_date=None,
-                    rental_end_date=None,
-                    updated_at=func.current_timestamp(),
-                )
-            )
-
     async def upsert_pending_product_search(
         self,
         conversation_id: str,
@@ -710,70 +674,12 @@ class AgentRepository:
             attributes.pop("pendingProductSearch", None)
             state.attributes = attributes
 
-    async def upsert_pending_rental_action(
-        self,
-        conversation_id: str,
-        pending_action: PendingRentalAction,
-    ) -> None:
-        attributes = {
-            "pendingRentalAction": pending_action.model_dump(
-                mode="json",
-                by_alias=True,
-            )
-        }
-        statement = pg_insert(ConversationState).values(
-            conversation_id=conversation_id,
-            attributes=attributes,
-        )
-        statement = statement.on_conflict_do_update(
-            index_elements=[ConversationState.conversation_id],
-            set_={
-                "attributes": ConversationState.attributes.op("||")(statement.excluded.attributes),
-                "updated_at": func.current_timestamp(),
-            },
-        )
-        async with self._sessions.begin() as session:
-            await session.execute(statement)
-
-    async def clear_pending_rental_action(self, conversation_id: str) -> None:
-        async with self._sessions.begin() as session:
-            state = await session.get(
-                ConversationState,
-                conversation_id,
-                with_for_update=True,
-            )
-            if state is None or "pendingRentalAction" not in state.attributes:
-                return
-            attributes = dict(state.attributes)
-            attributes.pop("pendingRentalAction", None)
-            state.attributes = attributes
-
     async def upsert_recent_product_search(
         self,
         conversation_id: str,
         recent_search: RecentProductSearch,
     ) -> None:
         attributes = {"recentProductSearch": recent_search.model_dump(mode="json", by_alias=True)}
-        statement = pg_insert(ConversationState).values(
-            conversation_id=conversation_id,
-            attributes=attributes,
-        )
-        statement = statement.on_conflict_do_update(
-            index_elements=[ConversationState.conversation_id],
-            set_={
-                "attributes": ConversationState.attributes.op("||")(statement.excluded.attributes),
-                "updated_at": func.current_timestamp(),
-            },
-        )
-        async with self._sessions.begin() as session:
-            await session.execute(statement)
-
-    async def upsert_conversation_requirements(
-        self,
-        conversation_id: str,
-        requirements: RentalRequirements,
-    ) -> None:
-        attributes = {"rentalRequirements": requirements.model_dump(mode="json", by_alias=True)}
         statement = pg_insert(ConversationState).values(
             conversation_id=conversation_id,
             attributes=attributes,
@@ -802,26 +708,12 @@ class AgentRepository:
             state = await session.get(ConversationState, conversation_id)
             if state is None:
                 return None
-            raw_requirements = state.attributes.get("rentalRequirements")
             raw_pending_search = state.attributes.get("pendingProductSearch")
-            raw_pending_rental_action = state.attributes.get("pendingRentalAction")
             raw_recent_product_search = state.attributes.get("recentProductSearch")
             return ConversationStateMemory(
-                rental_start_date=state.rental_start_date,
-                rental_end_date=state.rental_end_date,
-                rental_requirements=(
-                    RentalRequirements.model_validate(raw_requirements)
-                    if raw_requirements is not None
-                    else None
-                ),
                 pending_product_search=(
                     PendingProductSearch.model_validate(raw_pending_search)
                     if raw_pending_search is not None
-                    else None
-                ),
-                pending_rental_action=(
-                    PendingRentalAction.model_validate(raw_pending_rental_action)
-                    if raw_pending_rental_action is not None
                     else None
                 ),
                 recent_product_search=(

@@ -14,9 +14,7 @@ from gearmate.agent.service import RunCoordinator
 from gearmate.auth.jwt import CurrentUser, current_user
 from gearmate.config import Settings
 from gearmate.persistence.repositories import ActiveRunConflict, AgentRepository
-from gearmate.rental_period import InvalidRentalPeriod
 from gearmate.streaming.sse import encode_event, heartbeat
-from gearmate.tools.contracts import RentalPeriodInput
 
 router = APIRouter(prefix="/api/v1", tags=["Agent"])
 TERMINAL_STATUSES = {"COMPLETED", "OUTPUT_TRUNCATED", "REFUSED", "FAILED", "CANCELLED"}
@@ -60,7 +58,6 @@ class ConversationMessageResponse(ApiModel):
 
 class CreateRunRequest(ApiModel):
     message: str = Field(min_length=1, max_length=4000)
-    rental_period: RentalPeriodInput | None = None
 
     @field_validator("message")
     @classmethod
@@ -161,15 +158,9 @@ async def create_run(
             user_id=user.user_id,
             access_token=user.access_token,
             message=body.message,
-            rental_period=body.rental_period,
         )
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except InvalidRentalPeriod as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(error),
-        ) from error
     except ActiveRunConflict as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return RunResponse(run_id=run_id, conversation_id=conversation_id, status="RUNNING")

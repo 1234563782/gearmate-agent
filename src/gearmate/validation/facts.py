@@ -5,19 +5,20 @@ from decimal import Decimal, InvalidOperation
 from pydantic import BaseModel
 
 from gearmate.tools.contracts import (
-    AvailabilityResult,
-    OrderPage,
-    OrderSummary,
     ProductDetail,
     ProductSearchResult,
     ProductSummary,
-    QuoteResult,
-    ScenarioKitResult,
+    StoreOrder,
+    StoreOrderPage,
+    StoreSku,
+    StoreSkuList,
 )
 
 ULID_PATTERN = re.compile(r"\b[0-9A-HJKMNP-TV-Z]{26}\b")
-MONEY_PATTERN = re.compile(r"(?:CNY\s*|¥\s*|￥\s*)(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*元")
-COUNT_PATTERN = re.compile(r"(?<!\d)(\d+)\s*台")
+MONEY_PATTERN = re.compile(
+    r"(?:CNY\s*|[¥￥]\s*)(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*元"
+)
+COUNT_PATTERN = re.compile(r"(?<!\d)(\d+)\s*(?:件|台)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +34,10 @@ class FactValidationResult:
 @dataclass(slots=True)
 class FactSnapshot:
     products: dict[str, ProductSummary] = field(default_factory=dict)
-    availability: dict[str, AvailabilityResult] = field(default_factory=dict)
-    quotes: dict[str, QuoteResult] = field(default_factory=dict)
-    scenario_kits: list[ScenarioKitResult] = field(default_factory=list)
-    orders: dict[str, OrderSummary] = field(default_factory=dict)
     product_search_performed: bool = False
-    order_list_performed: bool = False
+    store_skus: dict[str, StoreSku] = field(default_factory=dict)
+    store_orders: dict[str, StoreOrder] = field(default_factory=dict)
+    store_order_list_performed: bool = False
     constraint_amounts: set[Decimal] = field(default_factory=set)
     constraint_counts: set[int] = field(default_factory=set)
 
@@ -60,28 +59,23 @@ class FactSnapshot:
                 name=result.name,
                 brand=result.brand,
                 model=result.model,
-                daily_rate=result.daily_rate,
-                fixed_deposit=result.fixed_deposit,
-                available_count=None,
                 use_cases=result.use_cases,
             )
-        elif isinstance(result, AvailabilityResult):
-            self.availability[result.product_id] = result
-        elif isinstance(result, QuoteResult):
-            self.quotes[result.quote_id] = result
-        elif isinstance(result, ScenarioKitResult):
-            self.scenario_kits.append(result)
-            self.products.update((item.product.product_id, item.product) for item in result.items)
-        elif isinstance(result, OrderPage):
-            self.order_list_performed = True
-            self.orders.update((item.order_id, item) for item in result.items)
+        elif isinstance(result, StoreSkuList):
+            self.store_skus.update((item.sku_id, item) for item in result.items)
+        elif isinstance(result, StoreSku):
+            self.store_skus[result.sku_id] = result
+        elif isinstance(result, StoreOrderPage):
+            self.store_order_list_performed = True
+            self.store_orders.update((item.order_id, item) for item in result.items)
+        elif isinstance(result, StoreOrder):
+            self.store_orders[result.order_id] = result
         else:
             raise TypeError(f"Unsupported fact result: {type(result).__name__}")
 
     def validate(self, text: str) -> FactValidationResult:
         stated_ids = set(ULID_PATTERN.findall(text))
         unsupported_ids = tuple(sorted(stated_ids))
-        missing_fact_citation = False
         allowed_amounts = self._allowed_amounts()
         stated_amounts = {
             self._money_value(first or second) for first, second in MONEY_PATTERN.findall(text)
@@ -90,13 +84,17 @@ class FactSnapshot:
             sorted(str(amount) for amount in stated_amounts if amount not in allowed_amounts)
         )
         allowed_counts = set(self.constraint_counts)
-        allowed_counts.update(result.available_count for result in self.availability.values())
+        allowed_counts.update(sku.available_quantity for sku in self.store_skus.values())
+        for product in self.products.values():
+            allowed_counts.update(sku.available_quantity for sku in product.store_skus)
+            if product.store_skus:
+                allowed_counts.add(sum(sku.available_quantity for sku in product.store_skus))
         allowed_counts.update(
-            product.available_count
-            for product in self.products.values()
-            if product.available_count is not None
+            item.quantity for order in self.store_orders.values() for item in order.items
         )
-        allowed_counts.update(item.quantity for kit in self.scenario_kits for item in kit.items)
+        allowed_counts.update(
+            sum(item.quantity for item in order.items) for order in self.store_orders.values()
+        )
         stated_counts = {int(value) for value in COUNT_PATTERN.findall(text)}
         unsupported_counts = tuple(sorted(stated_counts - allowed_counts))
         mismatched_product_ids = tuple(
@@ -112,107 +110,54 @@ class FactSnapshot:
                 and not unsupported_amounts
                 and not unsupported_counts
                 and not mismatched_product_ids
-                and not missing_fact_citation
             ),
             unsupported_ids=unsupported_ids,
             unsupported_amounts=unsupported_amounts,
             unsupported_counts=unsupported_counts,
             mismatched_product_ids=mismatched_product_ids,
-            missing_fact_citation=missing_fact_citation,
         )
 
     def fallback_text(self) -> str:
         lines: list[str] = []
-        for kit in self.scenario_kits:
-            for item in kit.items:
-                lines.append(
-                    f"- {item.product.name} × {item.quantity}："
-                    f"小计 {item.subtotal_daily_rate} 元/天"
-                )
-            if kit.missing_roles:
-                lines.append("- 当前目录还缺少部分必要设备")
-            lines.append(
-                f"- 组合日租合计 {kit.total_daily_rate} 元，"
-                f"预算 {kit.max_daily_budget} 元，"
-                + ("预算内" if kit.within_budget else "未满足完整性或预算约束")
-            )
-            if not kit.availability_checked:
-                lines.append("- 尚未提供完整租期，本组合未核验实时库存")
-        kit_product_ids = {
-            item.product.product_id for kit in self.scenario_kits for item in kit.items
-        }
         for product in list(self.products.values())[:5]:
-            if product.product_id in kit_product_ids:
-                continue
+            skus = [sku for sku in product.store_skus if sku.enabled]
             line = f"- {product.name}（{product.brand} {product.model}）"
-            available = self.availability.get(product.product_id)
-            if available is not None:
+            if skus:
                 line += (
-                    f"：可租 {available.available_count} 台"
-                    if available.available
-                    else "：当前租期不可租"
+                    f"：售价 {min(Decimal(sku.sale_price) for sku in skus):.2f} 元起，"
+                    f"可售库存 {sum(sku.available_quantity for sku in skus)} 件"
                 )
             lines.append(line)
-        for product_id, available in self.availability.items():
-            if product_id in self.products:
-                continue
-            availability_text = (
-                f"可租 {available.available_count} 台" if available.available else "当前租期不可租"
-            )
-            lines.append(f"- 这款设备：{availability_text}")
-        for quote in self.quotes.values():
-            snapshot = quote.price_snapshot
+        for sku in self.store_skus.values():
             lines.append(
-                f"- 正式报价：租金 {snapshot.rental_amount} 元，"
-                f"押金 {snapshot.deposit_amount} 元，总计 {snapshot.total_amount} 元"
+                f"- {sku.sku_name}：售价 {sku.sale_price} 元，可售库存 {sku.available_quantity} 件"
             )
-        for order in self.orders.values():
-            lines.append(
-                f"- {order.product_name}：状态 {order.effective_status}，"
-                f"合计 {order.price_snapshot.total_amount} 元"
-            )
+        for order in self.store_orders.values():
+            names = "、".join(item.product_name for item in order.items[:2])
+            lines.append(f"- {names or '商城订单'}：{order.status}，合计 {order.payable_amount} 元")
         if not lines:
             if self.product_search_performed:
-                return (
-                    "当前没有找到符合这些搜索条件的商品。"
-                    "你可以调整商品类型、预算或租期后重试。"
-                )
-            if self.order_list_performed:
-                return "当前筛选条件下没有订单。"
-            return "暂时没有取得可核验的商品、库存或报价信息，请补充商品和租期后重试。"
+                return "当前没有找到符合搜索条件的商品，可以调整商品类型或预算后重试。"
+            if self.store_order_list_performed:
+                return "当前筛选条件下没有商城订单。"
+            return "暂时没有取得可核验的商品、库存或订单信息，请补充条件后重试。"
         return "我查到的结果如下：\n" + "\n".join(lines)
 
     def _allowed_amounts(self) -> set[Decimal]:
         values = set(self.constraint_amounts)
+        values.update(self._money_value(sku.sale_price) for sku in self.store_skus.values())
         for product in self.products.values():
-            values.add(self._money_value(product.daily_rate))
-            values.add(self._money_value(product.fixed_deposit))
-        for quote in self.quotes.values():
-            snapshot = quote.price_snapshot
+            values.update(self._money_value(sku.sale_price) for sku in product.store_skus)
+        for order in self.store_orders.values():
             values.update(
                 self._money_value(value)
                 for value in (
-                    snapshot.daily_rate,
-                    snapshot.rental_amount,
-                    snapshot.deposit_amount,
-                    snapshot.total_amount,
+                    order.item_amount,
+                    order.shipping_amount,
+                    order.payable_amount,
                 )
             )
-        for kit in self.scenario_kits:
-            values.add(self._money_value(kit.total_daily_rate))
-            values.add(self._money_value(kit.max_daily_budget))
-            values.update(self._money_value(item.subtotal_daily_rate) for item in kit.items)
-        for order in self.orders.values():
-            snapshot = order.price_snapshot
-            values.update(
-                self._money_value(value)
-                for value in (
-                    snapshot.daily_rate,
-                    snapshot.rental_amount,
-                    snapshot.deposit_amount,
-                    snapshot.total_amount,
-                )
-            )
+            values.update(self._money_value(item.subtotal) for item in order.items)
         return values
 
     @staticmethod

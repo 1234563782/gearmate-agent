@@ -32,10 +32,7 @@ class FakeMemory:
         now = datetime(2026, 7, 18, 12, tzinfo=UTC)
         return ConversationContext(
             messages=(ModelMessage(role="user", content="search for a camera"),),
-            rental_period=None,
-            rental_requirements=None,
             pending_product_search=None,
-            pending_rental_action=None,
             recent_product_search=None,
             timezone="Asia/Shanghai",
             now_utc=now,
@@ -89,7 +86,6 @@ async def test_run_persists_specific_model_capacity_error(
             user_id="user-1",
             access_token="token",
             message="search for a camera",
-            rental_period=None,
         )
 
     assert repository.finalized is not None

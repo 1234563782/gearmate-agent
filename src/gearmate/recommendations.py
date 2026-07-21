@@ -8,9 +8,10 @@ from gearmate.actions import AgentAction
 from gearmate.search import RecentProductReference
 from gearmate.tools.contracts import (
     ProductSearchResult,
+    ProductSummary,
     ProductUseCase,
-    QuoteResult,
-    RentalPeriodInput,
+    StoreSku,
+    StoreSkuList,
 )
 
 
@@ -28,9 +29,9 @@ class RecommendationCard(RecommendationModel):
     name: str
     brand: str
     model: str
-    daily_rate: str
-    fixed_deposit: str
-    available_count: int | None
+    sale_price: str | None = None
+    available_quantity: int | None = None
+    store_skus: tuple[StoreSku, ...] = ()
     use_cases: tuple[ProductUseCase, ...]
 
 
@@ -47,18 +48,18 @@ class FollowUpOption(RecommendationModel):
 
 
 class FollowUpQuestion(RecommendationModel):
-    field: Literal["use_case", "rental_period"]
+    field: Literal["use_case"]
     text: str
     options: tuple[FollowUpOption, ...] = ()
 
 
 class RecommendationPresentation(RecommendationModel):
-    mode: Literal["explore", "recommend"]
+    mode: Literal["explore", "recommend", "purchase"]
     intro: str
     sections: tuple[RecommendationSection, ...]
-    rental_period: RentalPeriodInput | None = None
     follow_up: FollowUpQuestion | None = None
     closing: str | None = None
+    purchase_quantity: int | None = None
 
 
 class RecommendationPlanner:
@@ -66,31 +67,18 @@ class RecommendationPlanner:
         self,
         result: ProductSearchResult,
         action: AgentAction,
-        rental_period: RentalPeriodInput | None,
     ) -> RecommendationPresentation:
-        cards = tuple(
-            RecommendationCard(
-                product_id=item.product_id,
-                name=item.name,
-                brand=item.brand,
-                model=item.model,
-                daily_rate=item.daily_rate,
-                fixed_deposit=item.fixed_deposit,
-                available_count=item.available_count,
-                use_cases=item.use_cases,
-            )
-            for item in result.items[:4]
-        )
+        cards = tuple(self._card(item) for item in result.items[:4])
         sections = (
             (
                 RecommendationSection(
                     use_case_id=None,
-                    title=f"接近日租 ¥{action.target_daily_rate}",
-                    description="这些设备按与目标日租的接近程度排列，优先看前面的候选。",
+                    title=f"接近售价 ¥{action.target_price}",
+                    description="这些商品按与目标价格的接近程度排列。",
                     products=cards,
                 ),
             )
-            if action.target_daily_rate is not None
+            if action.target_price is not None
             else self._sections(cards, action.use_case_id)
         )
         if action.use_case_id is None:
@@ -108,71 +96,66 @@ class RecommendationPlanner:
                 mode="explore",
                 intro=self._intro(action, sections),
                 sections=sections,
-                rental_period=rental_period,
                 follow_up=follow_up,
-                closing=self._closing(rental_period),
-            )
-        follow_up = None
-        if rental_period is None:
-            follow_up = FollowUpQuestion(
-                field="rental_period",
-                text="请提供起止日期（最早从后天开始，结束日包含在租期内）。",
+                closing=self._closing(),
             )
         return RecommendationPresentation(
             mode="recommend",
             intro=self._intro(action, sections),
             sections=sections,
-            rental_period=rental_period,
-            follow_up=follow_up,
-            closing=self._closing(rental_period),
+            closing=self._closing(),
         )
 
-    def plan_exact(
+    def plan_purchase(
         self,
         product: RecentProductReference,
-        rental_period: RentalPeriodInput,
-        available_count: int | None,
-        quote: QuoteResult | None = None,
-    ) -> RecommendationPresentation | None:
-        if product.daily_rate is None or product.fixed_deposit is None:
-            return None
+        skus: StoreSkuList,
+        quantity: int,
+    ) -> RecommendationPresentation:
+        available = tuple(sku for sku in skus.items if sku.enabled)
         card = RecommendationCard(
             product_id=product.product_id,
             name=product.name,
             brand=product.brand,
             model=product.model,
-            daily_rate=product.daily_rate,
-            fixed_deposit=product.fixed_deposit,
-            available_count=available_count,
+            sale_price=(
+                min(available, key=lambda sku: float(sku.sale_price)).sale_price
+                if available
+                else None
+            ),
+            available_quantity=sum(sku.available_quantity for sku in available),
+            store_skus=available,
             use_cases=product.use_cases,
         )
-        intro = "这个租期的实时库存已经核验，下面是你选中的设备。"
-        closing = "点开卡片可以查看完整报价并继续预订。"
-        if quote is not None:
-            price = quote.price_snapshot
-            availability = (
-                f"当前租期可租 {available_count} 台。"
-                if available_count is not None and available_count > 0
-                else ("当前租期暂无可租设备。" if available_count == 0 else "库存数量暂未核验。")
-            )
-            intro = (
-                "正式报价已生成："
-                f"日租 ¥{price.daily_rate}，按 {price.billing_days} 个自然日计费"
-                "（结束日包含在租期内）；"
-                f"租金 ¥{price.rental_amount}，押金 ¥{price.deposit_amount}，"
-                f"合计 ¥{price.total_amount}。{availability}"
-            )
-            closing = (
-                "当前租期暂无库存，请调整租期后重新报价。"
-                if available_count == 0
-                else "报价有有效期，点开卡片可以继续预订。"
-            )
         return RecommendationPresentation(
-            mode="recommend",
-            intro=intro,
-            sections=self._sections((card,), None),
-            rental_period=rental_period,
-            closing=closing,
+            mode="purchase",
+            intro="我已经查到这款商品的可售规格，请在卡片中确认规格和数量。",
+            sections=(
+                RecommendationSection(
+                    use_case_id=None,
+                    title="购买选择",
+                    description="库存与售价来自 RentFlow 当前 SKU；确认前不会创建订单。",
+                    products=(card,),
+                ),
+            ),
+            closing="确认商品后会进入结算页填写收货信息，Agent 不会自动支付。",
+            purchase_quantity=quantity,
+        )
+
+    @staticmethod
+    def _card(product: ProductSummary) -> RecommendationCard:
+        skus = product.store_skus
+        return RecommendationCard(
+            product_id=product.product_id,
+            name=product.name,
+            brand=product.brand,
+            model=product.model,
+            sale_price=(
+                min(skus, key=lambda sku: float(sku.sale_price)).sale_price if skus else None
+            ),
+            available_quantity=sum(sku.available_quantity for sku in skus),
+            store_skus=skus,
+            use_cases=product.use_cases,
         )
 
     @staticmethod
@@ -190,16 +173,16 @@ class RecommendationPlanner:
                 ),
                 card.use_cases[0] if card.use_cases else None,
             )
-            key = (primary.id, primary.name) if primary is not None else (None, "推荐设备")
+            key = (primary.id, primary.name) if primary is not None else (None, "推荐商品")
             grouped[key].append(card)
         return tuple(
             RecommendationSection(
                 use_case_id=use_case_id,
                 title=title,
                 description=(
-                    f"这些设备在目录中与“{title}”场景匹配度较高。"
+                    f"这些商品在目录中与“{title}”场景匹配度较高。"
                     if use_case_id is not None
-                    else "下面是与当前条件匹配度较高的设备。"
+                    else "下面是与当前条件匹配度较高的商品。"
                 ),
                 products=tuple(items),
             )
@@ -224,22 +207,14 @@ class RecommendationPlanner:
         action: AgentAction,
         sections: tuple[RecommendationSection, ...],
     ) -> str:
-        if action.target_daily_rate is not None:
-            return f"我按你的用途和目标日租 ¥{action.target_daily_rate} 整理了这些候选。"
-        if action.max_daily_rate is not None:
-            return f"我按你的用途和日租不超过 ¥{action.max_daily_rate} 整理了这些候选。"
+        if action.target_price is not None:
+            return f"我按你的用途和目标购买价 ¥{action.target_price} 整理了这些候选。"
+        if action.max_price is not None:
+            return f"我按你的用途和售价不超过 ¥{action.max_price} 整理了这些候选。"
         if action.use_case_id is not None and sections:
             return f"我按“{sections[0].title}”场景进一步缩小了范围。"
-        return "如果你还没确定具体用途，可以先从下面几个场景了解合适的设备。"
+        return "如果你还没有确定具体用途，可以先从下面几个场景了解合适的商品。"
 
     @staticmethod
-    def _closing(rental_period: RentalPeriodInput | None) -> str:
-        if rental_period is not None:
-            return (
-                "这些设备已按你提供的起止日期核验库存，结束日包含在租期内；"
-                "点开卡片可以查看报价并继续预订。"
-            )
-        return (
-            "可以先选择主要用途，也可以直接点开卡片填写起止日期"
-            "（最早从后天开始，结束日包含在租期内）并查询报价。"
-        )
+    def _closing() -> str:
+        return "可以继续选择主要用途，也可以直接点开卡片选择 SKU 和数量后进入结算。"

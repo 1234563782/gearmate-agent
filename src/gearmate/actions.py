@@ -15,7 +15,7 @@ from gearmate.llm.types import (
     ModelToolDefinition,
     ModelUsage,
 )
-from gearmate.tools.contracts import OrderStatus
+from gearmate.tools.contracts import StoreOrderStatus
 
 ACTION_RESOLVER_TOOL_NAME = "resolve_agent_action"
 PRICE_AMOUNT = r"(?P<amount>\d+(?:\.\d{1,2})?)"
@@ -32,21 +32,25 @@ APPROXIMATE_PRICE_SUFFIX = re.compile(
     rf"{PRICE_AMOUNT}\s*(?:元)?\s*(?:左右|上下|附近)",
     re.IGNORECASE,
 )
-DAILY_PRICE = re.compile(
-    rf"(?:每天|每日|一天|日租|每晚|per\s+day)[^\d]{{0,8}}{PRICE_AMOUNT}",
-    re.IGNORECASE,
-)
 CJK_CHARACTER = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+COMMERCE_ACTION_NAMES = (
+    "chat",
+    "product_search",
+    "product_detail",
+    "order_list",
+    "order_detail",
+    "sku_stock",
+    "purchase_prepare",
+)
 AgentActionName = Literal[
     "chat",
     "product_search",
     "product_detail",
-    "availability",
-    "quote",
     "order_list",
-    "scenario_continue",
+    "order_detail",
+    "sku_stock",
+    "purchase_prepare",
 ]
-PendingRentalActionName = Literal["availability", "quote"]
 KeywordSpecificity = Literal["generic", "specific"]
 
 
@@ -69,9 +73,12 @@ class AgentAction(BaseModel):
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     product_position: int | None = Field(default=None, ge=1, le=100)
-    max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
-    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
-    order_status: OrderStatus | None = None
+    max_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
+    sku_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    quantity: int | None = Field(default=None, ge=1, le=99)
+    order_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    order_status: StoreOrderStatus | None = None
     continues_pending: bool = False
 
 
@@ -91,17 +98,11 @@ class PendingProductSearch(BaseModel):
     semantic_query: str | None = Field(default=None, max_length=512)
     use_case_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     category_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-    max_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
-    target_daily_rate: Decimal | None = Field(default=None, gt=0, max_digits=10)
-    waiting_for_rental_period: bool = False
+    max_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=12)
 
     @classmethod
-    def from_action(
-        cls,
-        action: AgentAction,
-        *,
-        waiting_for_rental_period: bool,
-    ) -> "PendingProductSearch":
+    def from_action(cls, action: AgentAction) -> "PendingProductSearch":
         return cls(
             keyword=action.keyword,
             keyword_specificity=action.keyword_specificity,
@@ -111,9 +112,8 @@ class PendingProductSearch(BaseModel):
             semantic_query=action.semantic_query,
             use_case_id=action.use_case_id,
             category_id=action.category_id,
-            max_daily_rate=action.max_daily_rate,
-            target_daily_rate=action.target_daily_rate,
-            waiting_for_rental_period=waiting_for_rental_period,
+            max_price=action.max_price,
+            target_price=action.target_price,
         )
 
     def merge_into(self, action: AgentAction) -> AgentAction:
@@ -129,8 +129,8 @@ class PendingProductSearch(BaseModel):
                 "semantic_query": action.semantic_query or self.semantic_query,
                 "use_case_id": action.use_case_id or self.use_case_id,
                 "category_id": action.category_id or self.category_id,
-                "max_daily_rate": action.max_daily_rate or self.max_daily_rate,
-                "target_daily_rate": action.target_daily_rate or self.target_daily_rate,
+                "max_price": action.max_price or self.max_price,
+                "target_price": action.target_price or self.target_price,
             }
         )
 
@@ -154,41 +154,6 @@ def merge_pending_product_search(
     return action
 
 
-class PendingRentalAction(BaseModel):
-    model_config = ConfigDict(
-        frozen=True,
-        extra="forbid",
-        alias_generator=to_camel,
-        populate_by_name=True,
-    )
-
-    action: PendingRentalActionName
-    product_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-    @classmethod
-    def from_action(cls, action: AgentAction) -> "PendingRentalAction":
-        if action.action not in ("availability", "quote") or action.product_id is None:
-            raise ValueError("A rental action with a product ID is required")
-        return cls(action=action.action, product_id=action.product_id)
-
-    def merge_into(self, action: AgentAction) -> AgentAction:
-        return action.model_copy(
-            update={
-                "action": self.action,
-                "product_id": action.product_id or self.product_id,
-            }
-        )
-
-
-def merge_pending_rental_action(
-    action: AgentAction,
-    pending_rental_action: PendingRentalAction | None,
-) -> AgentAction:
-    if action.continues_pending and pending_rental_action is not None:
-        return pending_rental_action.merge_into(action)
-    return action
-
-
 @dataclass(frozen=True, slots=True)
 class AgentActionResolution:
     action: AgentAction | None
@@ -203,23 +168,25 @@ def normalize_price_intent(message: str, action: AgentAction) -> AgentAction:
     if hard_max is not None:
         return action.model_copy(
             update={
-                "max_daily_rate": Decimal(hard_max.group("amount")),
-                "target_daily_rate": None,
+                "max_price": Decimal(hard_max.group("amount")),
+                "target_price": None,
             }
         )
     preferred = (
         APPROXIMATE_PRICE_PREFIX.search(message)
         or APPROXIMATE_PRICE_SUFFIX.search(message)
-        or DAILY_PRICE.search(message)
     )
     if preferred is None:
         return action.model_copy(
-            update={"max_daily_rate": None, "target_daily_rate": None}
+            update={
+                "max_price": None,
+                "target_price": None,
+            }
         )
     return action.model_copy(
         update={
-            "max_daily_rate": None,
-            "target_daily_rate": Decimal(preferred.group("amount")),
+            "max_price": None,
+            "target_price": Decimal(preferred.group("amount")),
         }
     )
 
@@ -233,26 +200,18 @@ def preserve_semantic_query_language(message: str, action: AgentAction) -> Agent
 
 
 def action_resolver_system_prompt(
-    current_scenario_id: str | None,
     pending_product_search: PendingProductSearch | None,
-    pending_rental_action: PendingRentalAction | None,
     equipment_roles: tuple[str, ...],
     recent_product_search_json: str = "none",
     catalog_vocabulary: CatalogVocabulary | None = None,
     user_memory_context: str = "none",
 ) -> str:
-    current_scenario = current_scenario_id or "none"
     pending_search = (
         pending_product_search.model_dump_json(by_alias=True)
         if pending_product_search is not None
         else "none"
     )
     equipment_role_options = ", ".join(equipment_roles)
-    pending_rental = (
-        pending_rental_action.model_dump_json(by_alias=True)
-        if pending_rental_action is not None
-        else "none"
-    )
     known_brands = (
         json.dumps(catalog_vocabulary.brands, ensure_ascii=False)
         if catalog_vocabulary
@@ -278,10 +237,8 @@ def action_resolver_system_prompt(
         if catalog_vocabulary
         else "none"
     )
-    return f"""You only classify the user's current turn for a rental assistant.
-Current saved scenario: {current_scenario}
+    return f"""You only classify the user's current turn for an electronics commerce assistant.
 Current pending product search: {pending_search}
-Current pending availability or quote action: {pending_rental}
 Current recent product search with authoritative positions and IDs: {recent_product_search_json}
 User long-term preferences (soft context only): {user_memory_context}
 Allowed equipmentRole values: {equipment_role_options}
@@ -295,9 +252,9 @@ Choose one action based on meaning, in any user language:
 - product_search: browse, find, compare, or ask about products/categories. Extract a concise
   catalog intent, canonical English equipmentRole, brand, model, semantic use-case query, dynamic
   useCaseId from an authoritative use_case alias, and
-  optional category ID or price constraint. Use maxDailyRate only for a hard upper limit such as
-  "under 200 per day" or "at most 200". Use targetDailyRate for a desired/approximate price such
-  as "around 200 per day" or "I want the daily price to be 200"; do not turn an approximate
+  optional category ID or purchase-price constraint. Use maxPrice only for a hard upper limit such
+  as "under 5000" or "at most 5000". Use targetPrice for a desired/approximate purchase price such
+  as "around 5000"; do not turn an approximate
   target into a hard maximum. A generic category word already represented by
   equipmentRole must not be returned as keyword. Set keywordSpecificity=specific only for a real
   model fragment or subtype that must additionally narrow the role; otherwise omit keyword.
@@ -312,23 +269,21 @@ Choose one action based on meaning, in any user language:
 - product_detail: inspect or ask for details about one exact product. Include productId when it is
   explicit. For an ordinal reference such as "the first one", return productPosition instead of
   copying or inventing productId; the server maps the position to its authoritative saved ID.
-- availability: ask for live stock for one exact product. Include productId only when an exact ID
-  is explicit in the current turn. Use productPosition for ordinal references.
-- quote: explicitly request a formal quote for one exact product. Include productId under the same
-  rule and productPosition for ordinal references. General price discovery is product_search.
+- sku_stock: ask for current purchasable SKU stock for one exact product. Include productId only
+  when an exact ID is explicit in the current turn. Use productPosition for ordinal references.
+- purchase_prepare: the user wants to buy one exact product or asks to prepare checkout. Include
+  productId or skuId only when authoritative, and quantity only when explicit. This action prepares
+  SKU and quantity choices but never places or pays an order.
 - order_list: view or list the current signed-in user's orders. Use orderStatus only when the user
-  explicitly asks for pending confirmation, confirmed, received, cancelled, or expired orders.
+  explicitly asks for pending payment, paid, shipped, received, cancelled, or closed orders.
   Never request or invent a user ID, and never expose internal order or reservation IDs.
-- scenario_continue: start a multi-item use-case plan, explicitly continue the saved scenario, or
-  answer/change requirements for that scenario.
+- order_detail: inspect one exact commerce order. Include orderId only when supplied by a trusted
+  structured client context; never copy or invent an ID from assistant-visible prose.
 
-Classify only the current turn. A saved scenario must not turn thanks, chat, or a new single-product
-search into scenario_continue. Set continuesPending=true only when the current turn answers or
+Classify only the current turn. Set continuesPending=true only when the current turn answers or
 corrects an outstanding clarification for Current pending product search. When it is true, return
-only fields explicitly changed by this turn; the server will retain the other saved fields. Date,
-time, duration, or confirmation answers to Current pending availability or quote action must use
-that saved action and set continuesPending=true without inventing a new product ID. A new search or
-new availability/quote request or an order query must set continuesPending=false. Long-term
+only fields explicitly changed by this turn; the server will retain the other saved fields. A new
+search, stock/purchase request, or order query must set continuesPending=false. Long-term
 preferences must not populate current-turn brand, model, equipmentRole, useCaseId, or price fields
 unless the current user message explicitly states them. Never invent IDs or fill missing
 parameters."""
@@ -340,6 +295,10 @@ class AgentActionResolver:
 
     def _action_schema(self, equipment_roles: tuple[str, ...]) -> dict[str, Any]:
         schema = AgentAction.model_json_schema(by_alias=True)
+        schema["properties"]["action"] = {
+            "type": "string",
+            "enum": list(COMMERCE_ACTION_NAMES),
+        }
         equipment_role = schema["properties"]["equipmentRole"]
         equipment_role["anyOf"][0] = {
             "type": "string",
@@ -352,9 +311,7 @@ class AgentActionResolver:
         *,
         message: str,
         history: tuple[ModelMessage, ...],
-        current_scenario_id: str | None,
         pending_product_search: PendingProductSearch | None,
-        pending_rental_action: PendingRentalAction | None,
         model: ChatModelPort,
         max_output_tokens: int,
         recent_product_search_json: str = "none",
@@ -383,9 +340,7 @@ class AgentActionResolver:
                     ModelMessage(
                         role="system",
                         content=action_resolver_system_prompt(
-                            current_scenario_id,
                             pending_product_search,
-                            pending_rental_action,
                             equipment_roles,
                             recent_product_search_json,
                             catalog_vocabulary,
@@ -416,7 +371,7 @@ class AgentActionResolver:
             except ValidationError:
                 return AgentActionResolution(
                     action=None,
-                    clarification="请明确要搜索商品、查询库存、生成报价，还是继续设备方案。",
+                    clarification="请明确要搜索商品、查看商品或库存、准备购买，还是查询订单。",
                     usage=response.usage,
                 )
             action = normalize_price_intent(message, action)
@@ -458,6 +413,6 @@ class AgentActionResolver:
             )
         return AgentActionResolution(
             action=None,
-            clarification="请明确要搜索商品、查询库存、生成报价，还是继续设备方案。",
+            clarification="请明确要搜索商品、查看商品或库存、准备购买，还是查询订单。",
             usage=response.usage,
         )

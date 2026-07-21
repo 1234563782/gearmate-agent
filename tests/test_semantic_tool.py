@@ -1,11 +1,11 @@
 from gearmate.catalog import SemanticProductCandidate
 from gearmate.llm.types import ModelToolCall
 from gearmate.tools.contracts import (
-    AvailabilityInput,
     ProductDetail,
     ProductSearchInput,
     ProductSearchResult,
     ProductSummary,
+    StoreSku,
 )
 from gearmate.tools.registry import ToolRegistry
 from gearmate.validation.facts import FactSnapshot
@@ -47,8 +47,6 @@ class FakeRentFlow:
                     name="MacBook Pro 14",
                     brand="Apple",
                     model="MacBook Pro 14",
-                    daily_rate="160.00",
-                    fixed_deposit="1200.00",
                 ),
             ),
             page=0,
@@ -66,16 +64,7 @@ class FakeRentFlow:
             brand="Apple",
             model="MacBook Pro 14",
             description="Portable computer for editing",
-            daily_rate="160.00",
-            fixed_deposit="1200.00",
         )
-
-    async def search_availability(self, request: AvailabilityInput):
-        raise AssertionError("No rental period was provided")
-
-    async def create_quote(self, request):
-        raise AssertionError("Quote is not called")
-
 
 async def test_semantic_candidates_are_hydrated_from_rentflow() -> None:
     rentflow = FakeRentFlow()
@@ -158,38 +147,34 @@ async def test_semantic_failure_falls_back_to_structured_search() -> None:
 
 
 def test_price_preference_filters_hard_maximum_and_ranks_nearest_target() -> None:
+    def product(index: int, name: str, sale_price: str) -> ProductSummary:
+        product_id = f"01J0000000000000000000010{index}"
+        return ProductSummary(
+            product_id=product_id,
+            category_id="01J00000000000000000000001",
+            equipment_role="camera",
+            name=name,
+            brand="Demo",
+            model=name,
+            store_skus=(
+                StoreSku(
+                    sku_id=f"01J0000000000000000000020{index}",
+                    product_id=product_id,
+                    sku_code=f"SKU-{index}",
+                    sku_name="标准版",
+                    specs={},
+                    sale_price=sale_price,
+                    available_quantity=2,
+                    enabled=True,
+                ),
+            ),
+        )
+
     result = ProductSearchResult(
         items=(
-            ProductSummary(
-                product_id="01J00000000000000000000101",
-                category_id="01J00000000000000000000001",
-                equipment_role="camera",
-                name="Budget Camera",
-                brand="Demo",
-                model="Budget",
-                daily_rate="90.00",
-                fixed_deposit="500.00",
-            ),
-            ProductSummary(
-                product_id="01J00000000000000000000102",
-                category_id="01J00000000000000000000001",
-                equipment_role="camera",
-                name="Target Camera",
-                brand="Demo",
-                model="Target",
-                daily_rate="160.00",
-                fixed_deposit="500.00",
-            ),
-            ProductSummary(
-                product_id="01J00000000000000000000103",
-                category_id="01J00000000000000000000001",
-                equipment_role="camera",
-                name="Expensive Camera",
-                brand="Demo",
-                model="Expensive",
-                daily_rate="320.00",
-                fixed_deposit="500.00",
-            ),
+            product(1, "Budget Camera", "4500.00"),
+            product(2, "Target Camera", "5200.00"),
+            product(3, "Expensive Camera", "9000.00"),
         ),
         page=0,
         size=20,
@@ -199,10 +184,10 @@ def test_price_preference_filters_hard_maximum_and_ranks_nearest_target() -> Non
 
     ranked = ToolRegistry._apply_price_preference(
         result,
-        ProductSearchInput(max_daily_rate="200", target_daily_rate="150"),
+        ProductSearchInput(max_price="6000", target_price="5000"),
     )
 
-    assert [item.daily_rate for item in ranked.items] == ["160.00", "90.00"]
+    assert [item.name for item in ranked.items] == ["Target Camera", "Budget Camera"]
     assert ranked.total_elements == 2
 
 

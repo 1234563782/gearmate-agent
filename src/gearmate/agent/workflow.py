@@ -1,5 +1,4 @@
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
@@ -11,18 +10,13 @@ from gearmate.config import Settings
 from gearmate.llm.port import ChatModelPort
 from gearmate.llm.types import ModelMessage, ModelRequest, ModelToolCall
 from gearmate.prompts.loader import RenderedPrompt
-from gearmate.requirements import ScenarioPlan
 from gearmate.responses import UserResponseComposer
 from gearmate.search import ProductSearchPlanner
-from gearmate.tools.contracts import RentalPeriodInput
 from gearmate.tools.registry import ToolRegistry
 from gearmate.validation.facts import FactSnapshot
 
 EventWriter = Callable[[str, dict[str, Any]], Awaitable[None]]
-AUTOMATIC_SCENARIO_KIT_CALL_ID = "automatic-scenario-kit"
 AUTOMATIC_ACTION_CALL_ID = "automatic-action"
-AUTOMATIC_QUOTE_AVAILABILITY_CALL_ID = "automatic-quote-availability"
-AUTOMATIC_QUOTE_CALL_ID = "automatic-quote"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,103 +48,33 @@ class GearMateAgent:
         *,
         message: str,
         history: list[ModelMessage],
-        rental_period: RentalPeriodInput | None,
-        scenario_plan: ScenarioPlan | None,
         action: AgentAction,
         write_event: EventWriter,
-        timezone: str = "Asia/Shanghai",
         user_memory_context: str | None = None,
     ) -> AgentResult:
         facts = FactSnapshot()
-        if action.max_daily_rate is not None:
-            facts.add_constraint_amount(action.max_daily_rate)
-        if action.target_daily_rate is not None:
-            facts.add_constraint_amount(action.target_daily_rate)
+        if action.max_price is not None:
+            facts.add_constraint_amount(action.max_price)
+        if action.target_price is not None:
+            facts.add_constraint_amount(action.target_price)
+        if action.quantity is not None:
+            facts.add_constraint_count(action.quantity)
         response_composer = UserResponseComposer()
 
         def grounded_response() -> str:
-            return response_composer.compose(
-                action=action,
-                facts=facts,
-                rental_period=rental_period,
-                timezone=timezone,
-            )
+            return response_composer.compose(action=action, facts=facts)
 
-        if scenario_plan is not None and scenario_plan.requirements.daily_budget is not None:
-            facts.add_constraint_amount(scenario_plan.requirements.daily_budget)
-            for need in scenario_plan.equipment_needs:
-                facts.add_constraint_count(need.quantity)
         messages = [ModelMessage(role="system", content=self._prompt.content)]
         if user_memory_context:
             messages.append(ModelMessage(role="system", content=user_memory_context))
         messages.extend(history)
         if not history or history[-1].role != "user" or history[-1].content != message:
             messages.append(ModelMessage(role="user", content=message))
-        if rental_period is not None:
-            messages.append(
-                ModelMessage(
-                    role="system",
-                    content=(
-                        "本轮已确认租期（上海自然日，归还日期包含当天）："
-                        f"startDate={rental_period.start_date.isoformat()}, "
-                        f"endDate={rental_period.end_date.isoformat()}。"
-                    ),
-                )
-            )
-        if scenario_plan is not None and scenario_plan.ready:
-            messages.append(
-                ModelMessage(
-                    role="system",
-                    content=(
-                        "本轮已确认的结构化场景需求如下:\n"
-                        + json.dumps(scenario_plan.model_context(), ensure_ascii=False)
-                        + "\n不得把整个场景缩减成单一商品关键词。"
-                        "有每日预算时必须优先调用 recommend_scenario_kit，"
-                        "由工具选择商品并计算组合总价；"
-                        "没有预算时按 equipmentNeeds 中每个角色分别搜索。"
-                    ),
-                )
-            )
+
         automatic_tool_calls: list[ModelToolCall] = []
-        if (
-            scenario_plan is not None
-            and scenario_plan.ready
-            and scenario_plan.requirements.daily_budget is not None
-        ):
-            arguments: dict[str, Any] = {}
-            if rental_period is not None:
-                arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
-            automatic_call = ModelToolCall(
-                id=AUTOMATIC_SCENARIO_KIT_CALL_ID,
-                name="recommend_scenario_kit",
-                arguments=arguments,
-            )
-            automatic_tool_calls.append(automatic_call)
-            messages.append(
-                ModelMessage(
-                    role="assistant",
-                    content="",
-                    tool_calls=(automatic_call,),
-                )
-            )
-        elif scenario_plan is not None and scenario_plan.ready:
-            for index, need in enumerate(scenario_plan.equipment_needs):
-                arguments = {
-                    "keyword": need.keyword,
-                    "equipmentRole": need.role,
-                }
-                if rental_period is not None:
-                    arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
-                automatic_tool_calls.append(
-                    ModelToolCall(
-                        id=f"automatic-scenario-search-{index}",
-                        name="search_products",
-                        arguments=arguments,
-                    )
-                )
-        elif action.action == "product_search":
+        if action.action == "product_search":
             plan = ProductSearchPlanner().plan(action)
-            arguments = {}
+            arguments: dict[str, Any] = {}
             if plan.keyword:
                 arguments["keyword"] = plan.keyword
             if plan.equipment_role:
@@ -165,12 +89,10 @@ class GearMateAgent:
                 arguments["useCaseId"] = plan.use_case_id
             if plan.category_id:
                 arguments["categoryId"] = plan.category_id
-            if plan.max_daily_rate is not None:
-                arguments["maxDailyRate"] = str(plan.max_daily_rate)
-            if plan.target_daily_rate is not None:
-                arguments["targetDailyRate"] = str(plan.target_daily_rate)
-            if rental_period is not None:
-                arguments["rentalPeriod"] = rental_period.model_dump(mode="json", by_alias=True)
+            if plan.max_price is not None:
+                arguments["maxPrice"] = str(plan.max_price)
+            if plan.target_price is not None:
+                arguments["targetPrice"] = str(plan.target_price)
             automatic_tool_calls.append(
                 ModelToolCall(
                     id=AUTOMATIC_ACTION_CALL_ID,
@@ -179,44 +101,44 @@ class GearMateAgent:
                 )
             )
         elif action.action == "product_detail" and action.product_id is not None:
-            automatic_tool_calls.append(
-                ModelToolCall(
-                    id=AUTOMATIC_ACTION_CALL_ID,
-                    name="get_product",
-                    arguments={"productId": action.product_id},
+            automatic_tool_calls.extend(
+                (
+                    ModelToolCall(
+                        id=AUTOMATIC_ACTION_CALL_ID,
+                        name="get_product",
+                        arguments={"productId": action.product_id},
+                    ),
+                    ModelToolCall(
+                        id="automatic-product-skus",
+                        name="list_product_skus",
+                        arguments={"productId": action.product_id},
+                    ),
                 )
             )
-        elif (
-            action.action in ("availability", "quote")
-            and action.product_id is not None
-            and rental_period is not None
-        ):
-            arguments = {
-                "productId": action.product_id,
-                "startDate": rental_period.start_date.isoformat(),
-                "endDate": rental_period.end_date.isoformat(),
-            }
-            if action.action == "quote":
+        elif action.action in ("sku_stock", "purchase_prepare"):
+            if action.sku_id is not None:
                 automatic_tool_calls.append(
                     ModelToolCall(
-                        id=AUTOMATIC_QUOTE_AVAILABILITY_CALL_ID,
-                        name="check_availability",
-                        arguments=arguments,
+                        id=AUTOMATIC_ACTION_CALL_ID,
+                        name="get_store_sku",
+                        arguments={"skuId": action.sku_id},
                     )
                 )
-            automatic_tool_calls.append(
-                ModelToolCall(
-                    id=(
-                        AUTOMATIC_ACTION_CALL_ID
-                        if action.action == "availability"
-                        else AUTOMATIC_QUOTE_CALL_ID
-                    ),
-                    name=(
-                        "check_availability" if action.action == "availability" else "create_quote"
-                    ),
-                    arguments=arguments,
+            elif action.product_id is not None:
+                automatic_tool_calls.extend(
+                    (
+                        ModelToolCall(
+                            id="automatic-purchase-product",
+                            name="get_product",
+                            arguments={"productId": action.product_id},
+                        ),
+                        ModelToolCall(
+                            id=AUTOMATIC_ACTION_CALL_ID,
+                            name="list_product_skus",
+                            arguments={"productId": action.product_id},
+                        ),
+                    )
                 )
-            )
         elif action.action == "order_list":
             arguments = {
                 "page": 0,
@@ -227,8 +149,16 @@ class GearMateAgent:
             automatic_tool_calls.append(
                 ModelToolCall(
                     id=AUTOMATIC_ACTION_CALL_ID,
-                    name="list_orders",
+                    name="list_store_orders",
                     arguments=arguments,
+                )
+            )
+        elif action.action == "order_detail" and action.order_id is not None:
+            automatic_tool_calls.append(
+                ModelToolCall(
+                    id=AUTOMATIC_ACTION_CALL_ID,
+                    name="get_store_order",
+                    arguments={"orderId": action.order_id},
                 )
             )
         if automatic_tool_calls and not any(item.tool_calls for item in messages[-1:]):
@@ -242,30 +172,28 @@ class GearMateAgent:
 
         async def preprocess(state: AgentState) -> dict[str, Any]:
             if action.action == "product_detail" and action.product_id is None:
-                text = "请先指定一个准确商品或最近搜索结果中的位置。"
+                text = "请先指定一款商品，或告诉我是最近搜索结果中的第几个。"
                 await write_event(
                     "decision.made",
                     {"outcome": "NEED_CLARIFICATION", "field": "productId"},
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
-            if action.action in ("availability", "quote") and action.product_id is None:
-                text = (
-                    "请先指定具体商品，例如点击卡片，"
-                    "或告诉我是最近搜索结果中的第几个，再查询库存或生成报价。"
-                )
+            if (
+                action.action in ("sku_stock", "purchase_prepare")
+                and action.product_id is None
+                and action.sku_id is None
+            ):
+                text = "请先指定一款商品，例如点击最近推荐的商品卡片，或告诉我是第几个。"
                 await write_event(
                     "decision.made",
                     {"outcome": "NEED_CLARIFICATION", "field": "productId"},
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
-            if action.action in ("availability", "quote") and rental_period is None:
-                text = (
-                    "请提供完整租期，包括开始日期和归还日期；按上海自然日计算，"
-                    "最早可从后天起租，归还日期包含当天。"
-                )
+            if action.action == "order_detail" and action.order_id is None:
+                text = "请从订单列表中选择一笔订单查看详情。"
                 await write_event(
                     "decision.made",
-                    {"outcome": "NEED_CLARIFICATION", "field": "rentalPeriod"},
+                    {"outcome": "NEED_CLARIFICATION", "field": "orderId"},
                 )
                 return {"final_text": text, "stop_reason": "NEED_CLARIFICATION"}
             if state["pending_tool_calls"]:
@@ -353,9 +281,7 @@ class GearMateAgent:
             return update
 
         async def validate_output(state: AgentState) -> dict[str, Any]:
-            text = (state["final_text"] or "").strip()
-            if not text:
-                text = grounded_response()
+            text = (state["final_text"] or "").strip() or grounded_response()
             validation = facts.validate(text)
             await write_event(
                 "output.validated",
